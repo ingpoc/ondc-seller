@@ -148,7 +148,7 @@ export async function validateSession(): Promise<SessionValidationResult> {
 
     currentWalletAddress = null;
     return { valid: false };
-  } catch (error) {
+  } catch {
     currentWalletAddress = null;
     return { valid: false };
   }

@@ -13,7 +13,7 @@ import {
   RADIUS,
   TRANSITIONS,
   GRID,
-} from '@drams-design/components';
+} from '@portfolio-ui';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 

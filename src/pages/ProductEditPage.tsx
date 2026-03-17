@@ -11,7 +11,7 @@ import {
   SPACING,
   TYPOGRAPHY,
   RADIUS,
-} from '@drams-design/components';
+} from '@portfolio-ui';
 
 const CARD_STYLE = {
   ...CARD.base,

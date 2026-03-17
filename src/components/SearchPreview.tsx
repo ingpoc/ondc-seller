@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { DramsProductCard } from '@drams-design/components';
-import { DRAMS, SPACING, TYPOGRAPHY, RADIUS, BUTTON } from '@drams-design/components';
+import { DramsProductCard } from '@portfolio-ui';
+import { DRAMS, SPACING, TYPOGRAPHY, RADIUS, BUTTON } from '@portfolio-ui';
 
 export interface SearchPreviewProps {
   query: string;

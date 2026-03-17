@@ -1,4 +1,4 @@
-import { AgentChat, PageLayout, PageHeader } from '@drams-design/components';
+import { AgentChat, PageLayout, PageHeader } from '@portfolio-ui';
 
 export function AgentChatPage(): React.ReactElement {
   return (

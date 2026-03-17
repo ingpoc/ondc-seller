@@ -4,6 +4,8 @@ import type { SSOUser } from '@/lib/api';
 const IDENTITY_URL = import.meta.env.VITE_IDENTITY_URL || 'https://aadharcha.in';
 const IDENTITY_WEB_URL = import.meta.env.VITE_IDENTITY_WEB_URL || IDENTITY_URL;
 
+export type { SSOUser };
+
 export interface AuthContextValue {
   /** Current authenticated user (null if not logged in) */
   user: SSOUser | null;

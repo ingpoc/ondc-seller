@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { PageLayout, PageHeader } from '@drams-design/components';
+import { PageLayout, PageHeader } from '@portfolio-ui';
 
 const IDENTITY_URL = import.meta.env.VITE_IDENTITY_URL || 'https://aadharcha.in';
 const IDENTITY_WEB_URL = import.meta.env.VITE_IDENTITY_WEB_URL || IDENTITY_URL;

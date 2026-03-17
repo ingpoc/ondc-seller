@@ -35,22 +35,19 @@ done
 
 echo "=== Running Tests ==="
 
-# Build command
-TEST_CMD="vitest run"
-
 if [ "$COVERAGE" = true ]; then
-  TEST_CMD="$TEST_CMD --coverage"
   echo "Running tests with coverage..."
+  npm run test:coverage
+  TEST_EXIT=$?
 elif [ "$WATCH" = true ]; then
-  TEST_CMD="vitest"
   echo "Running tests in watch mode..."
+  npm run test:watch
+  TEST_EXIT=$?
 else
   echo "Running tests..."
+  npm run test
+  TEST_EXIT=$?
 fi
-
-# Run tests
-eval "pnpm $TEST_CMD"
-TEST_EXIT=$?
 
 # Coverage summary
 if [ "$COVERAGE" = true ] && [ $TEST_EXIT -eq 0 ]; then

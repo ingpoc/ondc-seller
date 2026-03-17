@@ -157,7 +157,7 @@ These scripts customize the Claude Code workflow for this project. They are copi
 
 Template is generic. Customize for your test framework:
 
-- **Jest/Vitest:** `pnpm test -- --run`
+- **Jest/Vitest:** `npm run test`
 - **Pytest:** `pytest -v`
 - **Go:** `go test ./...`
 - **API tests:** Add endpoint testing
@@ -186,7 +186,7 @@ Template is generic. Customize for your test framework:
 
 Different project types need different commands:
 
-- **Monorepo:** `pnpm build && pnpm typecheck`
+- **Monorepo:** `npm run build && npm run typecheck`
 - **Frontend/Backend:** Kill ports, start servers
 - **Docker:** `docker-compose restart`
 

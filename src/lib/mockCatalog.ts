@@ -112,6 +112,11 @@ export function upsertDemoCatalogItem(item: BecknItem): void {
   saveDemoCatalogItems(items);
 }
 
+export function deleteDemoCatalogItem(id: string): void {
+  const items = getDemoCatalogItems().filter((item) => item.id !== id);
+  saveDemoCatalogItems(items);
+}
+
 export function findDemoCatalogItem(id: string): BecknItem | null {
   return getDemoCatalogItems().find((item) => item.id === id) ?? null;
 }

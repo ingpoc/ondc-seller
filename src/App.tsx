@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
-import { AppShell, RollingSearch, type NavItem } from '@portfolio-ui';
+import { AppShell, Badge, RollingSearch, type NavItem } from '@portfolio-ui';
 import { DashboardPage } from './pages/DashboardPage';
 import { CatalogPage } from './pages/CatalogPage';
 import { ProductEditPage } from './pages/ProductEditPage';
@@ -8,9 +8,8 @@ import { AgentChatPage } from './pages/AgentChatPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { ConfigPage } from './pages/ConfigPage';
-import { useTrustState } from './hooks/useTrustState';
+import { useAgentRuntime, useSubject, useTrustState } from './hooks';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { useWallet } from '@solana/wallet-adapter-react';
 import { TrustStatusChip } from './components/TrustStatus';
 
 const NAV_ITEMS: NavItem[] = [
@@ -53,9 +52,9 @@ function getActivePath(pathname: string): string {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { publicKey } = useWallet();
-  const walletAddress = publicKey?.toBase58() ?? null;
+  const { walletAddress, subjectId } = useSubject();
   const trust = useTrustState(walletAddress);
+  const runtime = useAgentRuntime(subjectId, walletAddress);
 
   const handleSearch = (query: string) => {
     navigate(`/catalog?q=${encodeURIComponent(query)}`);
@@ -84,6 +83,11 @@ export function App() {
       headerSearch={<RollingSearch onSearch={handleSearch} />}
       actions={
         <Fragment>
+          {subjectId ? (
+            <Badge tone={runtime.runtime_available ? 'success' : 'warning'}>
+              {runtime.loading ? 'Runtime loading' : `Runtime ${runtime.auth_mode}`}
+            </Badge>
+          ) : null}
           {walletAddress ? (
             <TrustStatusChip state={trust.state} loading={trust.loading} />
           ) : null}

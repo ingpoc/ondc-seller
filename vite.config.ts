@@ -20,6 +20,8 @@ export default defineConfig({
   server: {
     port: 3003,
     proxy: {
+      '/api/entitlements': 'http://localhost:8100',
+      '/api/agent': 'http://localhost:8100',
       '/api': 'http://localhost:3001',
       '/on_search': 'http://localhost:3001',
     },

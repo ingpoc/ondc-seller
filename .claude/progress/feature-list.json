@@ -141,7 +141,7 @@
       "description": "SSO: Auth hook with cookie validation (src/hooks/useAuth.ts)",
       "tier": "mvp",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "acceptance": [
         "useAuth() hook with user state",
         "Fetch user from https://aadharcha.in/api/auth/me with credentials: include",
@@ -155,7 +155,7 @@
       "description": "SSO: API client with session support (src/lib/api.ts)",
       "tier": "mvp",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "acceptance": [
         "Fetch/axios wrapper with credentials: include",
         "Session validation before API calls",
@@ -168,7 +168,7 @@
       "description": "SSO: Protected route wrapper",
       "tier": "mvp",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "acceptance": [
         "ProtectedRoute component",
         "Validate session before rendering",
@@ -181,7 +181,7 @@
       "description": "SSO: Environment configuration",
       "tier": "mvp",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "acceptance": [
         "VITE_IDENTITY_URL=https://aadharcha.in",
         "Local: VITE_IDENTITY_URL=http://localhost:3000",
@@ -193,7 +193,7 @@
       "description": "SSO: Login page redirect",
       "tier": "mvp",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "acceptance": [
         "/login page redirects to aadharcha.in/login",
         "Return URL parameter for redirect back",

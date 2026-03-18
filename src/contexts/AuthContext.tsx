@@ -1,23 +1,56 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { config } from '@/config/env';
-import type { AuthUser, AuthContextValue } from '@/types';
+import type { SSOUser } from '@/lib/api';
+import { normalizeLoopbackUrl } from '@/lib/loopback';
+
+const IDENTITY_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_URL || 'http://127.0.0.1:8000');
+const IDENTITY_WEB_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_WEB_URL || 'http://127.0.0.1:3000');
+const LOCAL_IDENTITY_AUTH_ENABLED = import.meta.env.VITE_IDENTITY_AUTH_ENABLED === 'true';
+
+export type { SSOUser };
+
+export interface AuthContextValue {
+  /** Current authenticated user (null if not logged in) */
+  user: SSOUser | null;
+  /** Is user currently authenticated */
+  isAuthenticated: boolean;
+  /** Is authentication state loading */
+  loading: boolean;
+  /** Any authentication error */
+  error: string | null;
+  /** Login to SSO provider */
+  login: (returnUrl?: string) => void;
+  /** Logout from SSO provider */
+  logout: () => void;
+  /** Refresh user session from SSO */
+  refresh: () => Promise<void>;
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<SSOUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchUser();
+    if (import.meta.env.DEV && !LOCAL_IDENTITY_AUTH_ENABLED) {
+      setUser(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    validateSession();
   }, []);
 
-  const fetchUser = async () => {
+  const validateSession = async () => {
     try {
-      const response = await fetch(`${config.identityUrl}/api/auth/me`, {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch(`${IDENTITY_URL}/api/auth/me`, {
         credentials: 'include',
       });
+
       if (response.ok) {
         const data = await response.json();
         setUser(data.data);
@@ -26,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Auth check failed');
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -34,19 +68,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = (returnUrl = '/') => {
     const encodedReturn = encodeURIComponent(window.location.origin + returnUrl);
     // Use identityWebUrl for login page (frontend), not gateway
-    window.location.href = `${config.identityWebUrl}/login?returnUrl=${encodedReturn}`;
+    window.location.href = `${IDENTITY_WEB_URL}/login?return=${encodedReturn}`;
   };
 
   const logout = async () => {
-    await fetch(`${config.identityUrl}/api/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-    setUser(null);
-    window.location.href = '/';
+    try {
+      await fetch(`${IDENTITY_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setUser(null);
+      window.location.href = '/';
+    }
   };
 
-  const refresh = () => fetchUser();
+  const refresh = () => validateSession();
 
   return (
     <AuthContext.Provider

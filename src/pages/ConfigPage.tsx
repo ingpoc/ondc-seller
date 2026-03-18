@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
-import { CARD, COLORS, SPACING, TYPOGRAPHY, DRAMS } from '@drams-design/components';
-import { PageLayout, PageHeader, DramsInput, DramsButton } from '@drams-design/components';
+import { CARD, COLORS, SPACING, TYPOGRAPHY, DRAMS } from '@portfolio-ui';
+import { PageLayout, PageHeader, DramsInput, DramsButton } from '@portfolio-ui';
+import { useTrustState } from '../hooks/useTrustState';
+import { TrustNotice } from '../components/TrustStatus';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 
 // Seller client configuration interface
 interface SellerClientConfig {
@@ -22,7 +26,7 @@ interface SellerClientConfig {
   timeout?: number;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const LOCAL_CONFIG_STORAGE_KEY = 'ondc-seller-local-config';
 
 interface ConfigError {
   field: string;
@@ -52,7 +56,31 @@ const HELPER_TEXT_STYLE = {
   color: DRAMS.textLight,
 };
 
+function readLocalConfig(): Partial<SellerClientConfig> | null {
+  const raw = localStorage.getItem(LOCAL_CONFIG_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as Partial<SellerClientConfig>;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalConfig(config: SellerClientConfig) {
+  localStorage.setItem(LOCAL_CONFIG_STORAGE_KEY, JSON.stringify(config));
+}
+
+function createDemoPrivateKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes));
+}
+
 export function ConfigPage() {
+  const { publicKey } = useWallet();
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [config, setConfig] = useState<SellerClientConfig>({
     baseUrl: 'https://gateway.ondc.org',
     subscriberId: '',
@@ -78,7 +106,15 @@ export function ConfigPage() {
   const loadConfig = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/seller/config`);
+      if (COMMERCE_DEMO_MODE) {
+        const localConfig = readLocalConfig();
+        if (localConfig) {
+          setConfig((prev: SellerClientConfig) => ({ ...prev, ...localConfig }));
+        }
+        return;
+      }
+
+      const response = await fetch(buildCommerceUrl('/api/seller/config'));
       if (response.ok) {
         const data = await response.json();
         if (data.config) {
@@ -128,7 +164,13 @@ export function ConfigPage() {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/seller/config`, {
+      if (COMMERCE_DEMO_MODE) {
+        saveLocalConfig(config);
+        setTestResult({ success: true, message: 'Configuration saved locally for browser testing' });
+        return;
+      }
+
+      const response = await fetch(buildCommerceUrl('/api/seller/config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
@@ -151,10 +193,23 @@ export function ConfigPage() {
 
   const handleGenerateKeyPair = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/seller/config/generate-keys`, {
+      if (COMMERCE_DEMO_MODE) {
+        setConfig((prev: SellerClientConfig) => ({
+          ...prev,
+          privateKey: createDemoPrivateKey(),
+          keyId: `${prev.subscriberId || 'seller'}-${Date.now()}`,
+        }));
+        setTestResult({
+          success: true,
+          message: 'Generated a local demo key pair. Save the configuration to persist it for browser testing.',
+        });
+        return;
+      }
+
+      const response = await fetch(buildCommerceUrl('/api/seller/config/generate-keys'), {
         method: 'POST',
       });
-      if (response.ok) {
+      if (!response.ok) {
         throw new Error('Failed to generate key pair');
       }
       const data = await response.json();
@@ -186,8 +241,16 @@ export function ConfigPage() {
 
     setTesting(true);
     try {
+      if (COMMERCE_DEMO_MODE) {
+        setTestResult({
+          success: true,
+          message: 'Local demo mode is active. Configuration structure looks valid for browser testing.',
+        });
+        return;
+      }
+
       // Test connection via server API
-      const response = await fetch(`${API_BASE}/api/seller/config/test`, {
+      const response = await fetch(buildCommerceUrl('/api/seller/config/test'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config }),
@@ -231,6 +294,14 @@ export function ConfigPage() {
         subtitle="Configure your ONDC seller credentials and connection settings"
       />
 
+      <TrustNotice
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        actionLabel="Resolve operator trust in AadhaarChain"
+      />
+
       {/* Result Message */}
       {testResult && (
         <div
@@ -254,6 +325,12 @@ export function ConfigPage() {
         </div>
       )}
 
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSave();
+        }}
+      >
       {/* Configuration Form */}
       <div style={{ ...CARD.base, marginBottom: SPACING.xl }}>
         <h2 style={{ ...TYPOGRAPHY.h3, color: DRAMS.textDark, marginBottom: SPACING.xl }}>
@@ -263,6 +340,7 @@ export function ConfigPage() {
         {/* Gateway URL */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-base-url"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -273,6 +351,8 @@ export function ConfigPage() {
             Gateway URL *
           </label>
           <DramsInput
+            id="seller-config-base-url"
+            name="baseUrl"
             type="text"
             value={config.baseUrl}
             onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
@@ -289,6 +369,7 @@ export function ConfigPage() {
         {/* Subscriber ID */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-subscriber-id"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -299,6 +380,8 @@ export function ConfigPage() {
             Subscriber ID *
           </label>
           <DramsInput
+            id="seller-config-subscriber-id"
+            name="subscriberId"
             type="text"
             value={config.subscriberId}
             onChange={(e) => setConfig({ ...config, subscriberId: e.target.value })}
@@ -318,6 +401,7 @@ export function ConfigPage() {
         {/* Private Key */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-private-key"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -329,6 +413,8 @@ export function ConfigPage() {
           </label>
           <div style={{ display: 'flex', gap: SPACING.md }}>
             <DramsInput
+              id="seller-config-private-key"
+              name="privateKey"
               type={showPrivateKey ? 'text' : 'password'}
               value={config.privateKey}
               onChange={(e) => setConfig({ ...config, privateKey: e.target.value })}
@@ -360,6 +446,7 @@ export function ConfigPage() {
         {/* Key ID */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-key-id"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -370,6 +457,8 @@ export function ConfigPage() {
             Key ID
           </label>
           <DramsInput
+            id="seller-config-key-id"
+            name="keyId"
             type="text"
             value={config.keyId}
             onChange={(e) => setConfig({ ...config, keyId: e.target.value })}
@@ -390,6 +479,7 @@ export function ConfigPage() {
         {/* Domain */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-domain"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -400,6 +490,8 @@ export function ConfigPage() {
             Domain
           </label>
           <DramsInput
+            id="seller-config-domain"
+            name="domain"
             type="text"
             value={config.domain}
             onChange={(e) => setConfig({ ...config, domain: e.target.value })}
@@ -411,6 +503,7 @@ export function ConfigPage() {
         {/* City */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-city"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -421,6 +514,8 @@ export function ConfigPage() {
             City
           </label>
           <DramsInput
+            id="seller-config-city"
+            name="city"
             type="text"
             value={config.city}
             onChange={(e) => setConfig({ ...config, city: e.target.value })}
@@ -432,6 +527,7 @@ export function ConfigPage() {
         {/* Country */}
         <div style={{ marginBottom: SPACING.xl }}>
           <label
+            htmlFor="seller-config-country"
             style={{
               display: 'block',
               marginBottom: SPACING.sm,
@@ -442,6 +538,8 @@ export function ConfigPage() {
             Country
           </label>
           <DramsInput
+            id="seller-config-country"
+            name="country"
             type="text"
             value={config.country}
             onChange={(e) => setConfig({ ...config, country: e.target.value })}
@@ -454,7 +552,7 @@ export function ConfigPage() {
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: SPACING.md, flexWrap: 'wrap' }}>
-        <DramsButton type="button" onClick={handleSave} disabled={loading} loading={loading}>
+        <DramsButton type="submit" disabled={loading} loading={loading}>
           {loading ? 'Saving...' : 'Save Configuration'}
         </DramsButton>
 
@@ -481,6 +579,7 @@ export function ConfigPage() {
           </DramsButton>
         )}
       </div>
+      </form>
 
       {/* Info Section */}
       <div style={{ marginTop: SPACING.xl, ...CARD.base, padding: SPACING.lg }}>

@@ -1,14 +1,32 @@
-import { config } from '@/config/env';
-import type { AuthUser } from '@/types';
+/**
+ * SSO-002: API Client with Aadharcha.in SSO Session Support
+ *
+ * Wallet-based SSO integration:
+ * - Uses Solana wallet address as user ID
+ * - Cookie-based session (aadharcha_session)
+ * - Session validation via /api/auth/validate
+ * - Auto-redirect to identity provider on 401
+ *
+ * Aadharcha.in SSO Endpoints:
+ * - POST /api/auth/login - Create session with wallet_address
+ * - GET /api/auth/me - Get current user (401 if not authenticated)
+ * - GET /api/auth/validate - Validate session (returns valid: boolean)
+ * - POST /api/auth/logout - Revoke session and clear cookie
+ */
 
-interface ApiOptions {
-  headers?: Record<string, string>;
-}
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
+import { COMMERCE_API_BASE } from './commerceConfig';
+import { normalizeLoopbackUrl } from './loopback';
 
-let currentUser: AuthUser | null = null;
+const IDENTITY_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_URL || 'https://aadharcha.in');
+// Login page URL (frontend) - separate from API gateway
+const IDENTITY_WEB_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_WEB_URL || IDENTITY_URL);
+
+// Current authenticated user's wallet address
+let currentWalletAddress: string | null = null;
 
 /**
- * Identity service user type from SSO
+ * User type from Aadharcha SSO
  */
 export interface SSOUser {
   wallet_address: string;
@@ -25,50 +43,151 @@ export interface SessionValidationResult {
   user?: SSOUser;
 }
 
-// Current wallet address from SSO session
-let currentWalletAddress: string | null = null;
-
 /**
- * Identity service API client - calls gateway for auth
- * Uses config.identityUrl which points to the gateway
+ * Login response
  */
-async function identityRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${config.identityUrl}/api${endpoint}`;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+export interface LoginResult {
+  user: SSOUser;
+  session: {
+    session_id: number;
+    created_at: number;
+    last_active: number;
+    expires_at: number;
   };
-
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include', // Include session cookie
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 /**
- * Validate session with identity gateway
+ * Create configured Axios instance for identity service
+ */
+export const identityClient: AxiosInstance = axios.create({
+  baseURL: `${IDENTITY_URL}/api`,
+  withCredentials: true, // CRITICAL: Include aadharcha_session cookie
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+/**
+ * Create configured Axios instance for backend API
+ */
+export const apiClient: AxiosInstance = axios.create({
+  baseURL: COMMERCE_API_BASE || undefined,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+/**
+ * Request interceptor - add wallet address as X-User-ID header
+ */
+apiClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    if (currentWalletAddress) {
+      config.headers = config.headers || {};
+      config.headers['X-User-ID'] = currentWalletAddress;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+/**
+ * Response interceptor - redirect to login on 401
+ */
+apiClient.interceptors.response.use(
+  (response: AxiosResponse) => response,
+  async (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      // Session expired or invalid - redirect to login
+      const currentPath = window.location.pathname;
+      // Don't redirect if already on login page
+      if (currentPath !== '/login') {
+        const returnUrl = encodeURIComponent(`${window.location.origin}${currentPath}`);
+        window.location.href = `${IDENTITY_URL}/login?return=${returnUrl}`;
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+/**
+ * Login with wallet address
+ * POST /api/auth/login
+ *
+ * Creates SSO session and sets aadharcha_session cookie
+ */
+export async function loginWithWallet(walletAddress: string): Promise<LoginResult> {
+  const response = await identityClient.post<LoginResult>('/auth/login', {
+    wallet_address: walletAddress,
+  });
+
+  const result = response.data;
+  if (result.user) {
+    currentWalletAddress = result.user.wallet_address;
+  }
+
+  return result;
+}
+
+/**
+ * Validate session
  * GET /api/auth/validate
+ *
+ * Returns { valid: boolean, user?: SSOUser }
+ * Use this for non-blocking validation (doesn't throw on 401)
  */
 export async function validateSession(): Promise<SessionValidationResult> {
   try {
-    const response = await identityRequest<{ success: boolean; data: { valid: boolean; user?: SSOUser } }>('/auth/validate');
-    if (response.success && response.data.valid && response.data.user) {
-      currentWalletAddress = response.data.user.wallet_address;
-      return { valid: true, user: response.data.user };
+    const response = await identityClient.get<{ valid: boolean; user?: SSOUser }>('/auth/validate');
+    const result = response.data;
+
+    if (result.valid && result.user) {
+      currentWalletAddress = result.user.wallet_address;
+      return { valid: true, user: result.user };
     }
+
     currentWalletAddress = null;
     return { valid: false };
+  } catch {
+    currentWalletAddress = null;
+    return { valid: false };
+  }
+}
+
+/**
+ * Get current authenticated user
+ * GET /api/auth/me
+ *
+ * Throws 401 if not authenticated
+ * Use this when user must be logged in
+ */
+export async function getCurrentUser(): Promise<SSOUser> {
+  const response = await identityClient.get<{ data: SSOUser }>('/auth/me');
+  const user = response.data.data;
+
+  if (user) {
+    currentWalletAddress = user.wallet_address;
+  }
+
+  return user;
+}
+
+/**
+ * Logout from SSO
+ * POST /api/auth/logout
+ *
+ * Revokes session and clears cookie
+ */
+export async function logout(): Promise<void> {
+  try {
+    await identityClient.post('/auth/logout', {});
   } catch (error) {
+    console.error('Logout error:', error);
+  } finally {
     currentWalletAddress = null;
-    return { valid: false };
+    // Redirect to home after logout
+    window.location.href = '/';
   }
 }
 
@@ -86,55 +205,28 @@ export function isAuthenticated(): boolean {
   return currentWalletAddress !== null;
 }
 
-export function setCurrentUser(user: AuthUser | null) {
-  currentUser = user;
+/**
+ * Redirect to identity provider login page
+ */
+export function redirectToLogin(returnPath: string = window.location.pathname): void {
+  const returnUrl = encodeURIComponent(`${window.location.origin}${returnPath}`);
+  // Use IDENTITY_WEB_URL for login page (frontend), not gateway
+  window.location.href = `${IDENTITY_WEB_URL}/login?return=${returnUrl}`;
 }
 
-async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = endpoint.startsWith('http') ? endpoint : `${config.apiUrl}${endpoint}`;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
-
-  if (currentUser?.wallet_address) {
-    headers['X-User-ID'] = currentUser.wallet_address;
+/**
+ * Record app access for SSO analytics
+ * POST /api/auth/apps/{app_name}/access
+ *
+ * Call this when user successfully accesses your app
+ */
+export async function recordAppAccess(appName: string): Promise<void> {
+  try {
+    await identityClient.post(`/auth/apps/${appName}/access`, {});
+  } catch (error) {
+    console.warn('Failed to record app access:', error);
   }
-
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
-
-  if (response.status === 401) {
-    const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
-    window.location.href = `/login?returnUrl=${returnUrl}`;
-    throw new Error('Unauthorized');
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
-export const api = {
-  get: <T>(url: string, options?: ApiOptions) => apiRequest<T>(url, { ...options, method: 'GET' }),
-  post: <T>(url: string, body?: unknown, options?: ApiOptions) =>
-    apiRequest<T>(url, {
-      ...options,
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  put: <T>(url: string, body?: unknown, options?: ApiOptions) =>
-    apiRequest<T>(url, {
-      ...options,
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-  delete: <T>(url: string, options?: ApiOptions) =>
-    apiRequest<T>(url, { ...options, method: 'DELETE' }),
-};
+// Export base URLs
+export { COMMERCE_API_BASE as API_BASE, IDENTITY_URL };

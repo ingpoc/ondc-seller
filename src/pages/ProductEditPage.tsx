@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { ProductForm } from '../components';
-import type { BecknItem } from '@ondc-sdk/shared';
+import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { upsertDemoCatalogItem } from '../lib/mockCatalog';
 import {
   PageLayout,
   PageHeader,
@@ -11,7 +13,7 @@ import {
   SPACING,
   TYPOGRAPHY,
   RADIUS,
-} from '@drams-design/components';
+} from '@portfolio-ui';
 
 const CARD_STYLE = {
   ...CARD.base,
@@ -31,7 +33,7 @@ const ERROR_STYLE = {
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const isNew = id === 'new';
+  const isNew = !id;
 
   const { data: existingProduct, execute } = useApi<BecknItem>(
     isNew ? '/api/catalog' : `/api/catalog/products/${id}`
@@ -54,6 +56,8 @@ export function ProductEditPage() {
       try {
         const payload = {
           id: data.id,
+          name: data.name,
+          description: data.description,
           descriptor: {
             name: data.name,
             short_desc: data.description,
@@ -62,11 +66,21 @@ export function ProductEditPage() {
             currency: data.currency,
             value: data.price,
           },
+          images: [],
+          category: {
+            name: data.categoryId || 'General',
+          },
           category_id: data.categoryId,
           fulfillment_id: 'ful-1',
         };
 
-        const url = isNew ? '/api/catalog/products' : `/api/catalog/products/${id}`;
+        if (COMMERCE_DEMO_MODE) {
+          upsertDemoCatalogItem(payload as BecknItem);
+          navigate('/catalog');
+          return;
+        }
+
+        const url = isNew ? buildCommerceUrl('/api/catalog/products') : buildCommerceUrl(`/api/catalog/products/${id}`);
         const method = isNew ? 'POST' : 'PUT';
 
         const response = await fetch(url, {

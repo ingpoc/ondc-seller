@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { MOCK_CATALOG_RESPONSE } from '../lib/mockCatalog';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { getDemoCatalogResponse, findDemoCatalogItem, MOCK_CATALOG_RESPONSE } from '../lib/mockCatalog';
 
 interface UseApiResult<T> {
   data: T | null;
@@ -17,7 +18,21 @@ export function useApi<T>(url: string): UseApiResult<T> {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(url);
+      if (COMMERCE_DEMO_MODE) {
+        if (url === '/api/catalog') {
+          setData(getDemoCatalogResponse() as T);
+          return;
+        }
+
+        if (url.startsWith('/api/catalog/products/')) {
+          const id = url.split('/').pop();
+          const item = id ? findDemoCatalogItem(id) : null;
+          setData(item as T);
+          return;
+        }
+      }
+
+      const response = await fetch(buildCommerceUrl(url));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

@@ -14,8 +14,7 @@ import {
   TRANSITIONS,
   GRID,
 } from '@portfolio-ui';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 
 // Order status grouping for seller
 const isPendingStatus = (status: UCPOrderStatus): boolean => status === 'created';
@@ -253,7 +252,12 @@ export function OrdersPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/seller/orders`);
+      if (COMMERCE_DEMO_MODE) {
+        setOrders([]);
+        return;
+      }
+
+      const response = await fetch(buildCommerceUrl('/api/seller/orders'));
       if (!response.ok) {
         throw new Error('Failed to load orders');
       }
@@ -274,7 +278,14 @@ export function OrdersPage() {
     async (orderId: string) => {
       setProcessing(orderId);
       try {
-        const response = await fetch(`${API_BASE}/api/seller/orders/${orderId}/accept`, {
+        if (COMMERCE_DEMO_MODE) {
+          setOrders((current) => current.map((order) => (
+            order.id === orderId ? { ...order, status: 'accepted' } : order
+          )));
+          return;
+        }
+
+        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
           method: 'POST',
         });
         if (!response.ok) {
@@ -298,7 +309,24 @@ export function OrdersPage() {
 
       setProcessing(orderId);
       try {
-        const response = await fetch(`${API_BASE}/api/seller/orders/${orderId}/reject`, {
+        if (COMMERCE_DEMO_MODE) {
+          setOrders((current) => current.map((order) => (
+            order.id === orderId
+              ? {
+                  ...order,
+                  status: 'cancelled',
+                  cancellation: {
+                    cancelledAt: new Date().toISOString(),
+                    cancelledBy: 'seller',
+                    reason: 'Seller rejected',
+                  },
+                }
+              : order
+          )));
+          return;
+        }
+
+        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: 'Seller rejected' }),

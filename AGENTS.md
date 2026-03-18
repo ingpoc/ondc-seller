@@ -6,6 +6,14 @@
 - This file adds only `ondc-seller`-specific execution guidance.
 - If this file conflicts with the root workspace `AGENTS.md`, the root file wins unless it explicitly allows a repo-local exception.
 
+## Browser Testing
+
+- BEFORE browser testing ONDC Seller -> read `../docs/workflow/browser-testing-control-plane.md`
+- BEFORE validating the same-user portfolio journey -> read `../docs/workflow/portfolio-browser-acceptance-loop.md`
+- Browser testing for this repo should happen after AadhaarChain trust state is confirmed, because seller catalog and config flows are trust-gated.
+- Critical browser routes for this repo: `/dashboard`, `/catalog`, `/catalog/new`, `/catalog/:id`, `/orders`, `/orders/:id`, `/config`, `/agent`
+- When local catalog data falls back to mocks, capture the failed network requests separately from the visible shell behavior.
+
 ONDC UCP Seller Portal - Private seller webapp
 
 ---

@@ -1,7 +1,10 @@
+import { COMMERCE_API_BASE } from '@/lib/commerceConfig';
+import { normalizeLoopbackUrl } from '@/lib/loopback';
+
 export const config = {
   // Gateway for API calls (/api/auth/validate, /api/auth/me)
-  identityUrl: import.meta.env.VITE_IDENTITY_URL || 'http://localhost:8000',
+  identityUrl: normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_URL || 'http://127.0.0.1:8000'),
   // Frontend for login page redirect (/login)
-  identityWebUrl: import.meta.env.VITE_IDENTITY_WEB_URL || import.meta.env.VITE_IDENTITY_URL || 'http://localhost:3000',
-  apiUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001',
+  identityWebUrl: normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_WEB_URL || import.meta.env.VITE_IDENTITY_URL || 'http://127.0.0.1:3000'),
+  apiUrl: COMMERCE_API_BASE || 'http://127.0.0.1:3001',
 } as const;

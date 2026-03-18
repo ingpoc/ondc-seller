@@ -12,8 +12,7 @@ import {
   CARD,
   COLORS,
 } from '@portfolio-ui';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
@@ -186,7 +185,11 @@ export function OrderDetailPage() {
       }
 
       try {
-        const response = await fetch(`${API_BASE}/api/seller/orders/${id}`);
+        if (COMMERCE_DEMO_MODE) {
+          throw new Error('Order not found');
+        }
+
+        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`));
         if (!response.ok) throw new Error('Order not found');
         const data = await response.json();
         setOrder(data.order);
@@ -204,7 +207,11 @@ export function OrderDetailPage() {
     if (!order || !id) return;
     setProcessing('accept');
     try {
-      const response = await fetch(`${API_BASE}/api/seller/orders/${id}/accept`, {
+      if (COMMERCE_DEMO_MODE) {
+        throw new Error('Order actions are unavailable in local demo mode');
+      }
+
+      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
         method: 'POST',
       });
       if (!response.ok) throw new Error('Failed to accept order');
@@ -223,7 +230,11 @@ export function OrderDetailPage() {
 
     setProcessing('reject');
     try {
-      const response = await fetch(`${API_BASE}/api/seller/orders/${id}/reject`, {
+      if (COMMERCE_DEMO_MODE) {
+        throw new Error('Order actions are unavailable in local demo mode');
+      }
+
+      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
@@ -245,7 +256,11 @@ export function OrderDetailPage() {
 
     setProcessing('dispatch');
     try {
-      const response = await fetch(`${API_BASE}/api/seller/orders/${id}/dispatch`, {
+      if (COMMERCE_DEMO_MODE) {
+        throw new Error('Order actions are unavailable in local demo mode');
+      }
+
+      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),

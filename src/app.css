@@ -1,8 +1,8 @@
 @import "tailwindcss";
-@import "../../shared/portfolio-ui/src/styles/tokens.css";
+@import "./portfolio-ui/styles/tokens.css";
 
 @source "./**/*.{ts,tsx}";
-@source "../../shared/portfolio-ui/src/**/*.{ts,tsx}";
+@source "./portfolio-ui/**/*.{ts,tsx}";
 
 #root {
   min-height: 100vh;

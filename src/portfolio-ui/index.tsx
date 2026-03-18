@@ -1137,6 +1137,7 @@ export interface AgentChatProps {
   placeholder?: string;
   title?: string;
   sessionId?: string;
+  requestHeaders?: HeadersInit | (() => HeadersInit);
   onMessage?: (message: AgentChatMessage) => void;
   height?: CSSProperties['height'];
   showEmptyState?: boolean;
@@ -1144,14 +1145,14 @@ export interface AgentChatProps {
 }
 
 const STORAGE_KEY = 'portfolio-agent-session-id';
-const API_BASE = 'http://localhost:3001';
 
-function getSharedSessionId() {
+function getSharedSessionId(endpoint: string) {
   if (typeof window === 'undefined') return '';
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  const storageKey = `${STORAGE_KEY}:${endpoint}`;
+  const stored = window.localStorage.getItem(storageKey);
   if (stored) return stored;
   const generated = `session-${Math.random().toString(36).slice(2, 10)}`;
-  window.localStorage.setItem(STORAGE_KEY, generated);
+  window.localStorage.setItem(storageKey, generated);
   return generated;
 }
 
@@ -1198,6 +1199,7 @@ export function AgentChat({
   placeholder = 'Type your message...',
   title = 'Agent Chat',
   sessionId: initialSessionId = '',
+  requestHeaders,
   onMessage,
   height,
   showEmptyState = true,
@@ -1206,7 +1208,7 @@ export function AgentChat({
   const [messages, setMessages] = useState<AgentChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId] = useState(initialSessionId || getSharedSessionId());
+  const [sessionId] = useState(initialSessionId || getSharedSessionId(endpoint));
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1228,9 +1230,13 @@ export function AgentChat({
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE}${endpoint}`, {
+      const resolvedHeaders = typeof requestHeaders === 'function' ? requestHeaders() : requestHeaders;
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(resolvedHeaders ?? {}),
+        },
         body: JSON.stringify({ prompt, sessionId, context: {} }),
       });
 
@@ -1266,7 +1272,7 @@ export function AgentChat({
       ]);
       setIsLoading(false);
     }
-  }, [endpoint, input, isLoading, onMessage, sessionId]);
+  }, [endpoint, input, isLoading, onMessage, requestHeaders, sessionId]);
 
   return (
     <ChatLayout

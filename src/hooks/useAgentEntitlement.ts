@@ -21,9 +21,43 @@ const DEFAULT_RUNTIME: AgentRuntimeSnapshot = {
   blocked_reason: 'Authentication required.',
 };
 
+function isUsageSnapshot(value: unknown): value is AgentRuntimeSnapshot['usage'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const usage = value as Record<string, unknown>;
+  return (
+    typeof usage.requests_used === 'number' &&
+    typeof usage.requests_limit === 'number' &&
+    typeof usage.period_start === 'string' &&
+    typeof usage.period_end === 'string' &&
+    typeof usage.estimated_cost_usd === 'number'
+  );
+}
+
+function isAgentRuntimeSnapshot(value: unknown): value is AgentRuntimeSnapshot {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const snapshot = value as Record<string, unknown>;
+  return (
+    snapshot.app_id === 'ondc-seller' &&
+    typeof snapshot.auth_mode === 'string' &&
+    typeof snapshot.model === 'string' &&
+    typeof snapshot.runtime_available === 'boolean' &&
+    typeof snapshot.agent_access === 'boolean' &&
+    typeof snapshot.trust_state === 'string' &&
+    typeof snapshot.trust_required_for_write === 'boolean' &&
+    typeof snapshot.mode === 'string' &&
+    Array.isArray(snapshot.allowed_capabilities) &&
+    (typeof snapshot.blocked_reason === 'string' || snapshot.blocked_reason === null || snapshot.blocked_reason === undefined) &&
+    isUsageSnapshot(snapshot.usage)
+  );
+}
+
 export function useAgentRuntime(subjectId?: string | null, walletAddress?: string | null) {
   const [snapshot, setSnapshot] = useState<AgentRuntimeSnapshot>(DEFAULT_RUNTIME);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(subjectId));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,7 +83,11 @@ export function useAgentRuntime(subjectId?: string | null, walletAddress?: strin
         if (!response.ok) {
           throw new Error(`Runtime request failed: ${response.status}`);
         }
-        const next = (await response.json()) as AgentRuntimeSnapshot;
+        const payload = await response.json();
+        if (!isAgentRuntimeSnapshot(payload)) {
+          throw new Error('Runtime response shape is invalid.');
+        }
+        const next = payload;
         if (!cancelled) {
           setSnapshot(next);
         }

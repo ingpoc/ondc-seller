@@ -1,15 +1,9 @@
 import { AgentChat, Alert, Badge, PageLayout, PageHeader } from '@portfolio-ui';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useAuthContext } from '@/contexts/AuthContext';
-import { useAgentRuntime } from '@/hooks/useAgentEntitlement';
-import { useTrustState } from '@/hooks/useTrustState';
+import { useAgentRuntime, useSubject, useTrustState } from '@/hooks';
 import { TrustNotice } from '@/components/TrustStatus';
 
 export function AgentChatPage(): React.ReactElement {
-  const { publicKey } = useWallet();
-  const { user, loading: authLoading } = useAuthContext();
-  const walletAddress = publicKey?.toBase58() ?? null;
-  const subjectId = user?.wallet_address ?? walletAddress;
+  const { walletAddress, subjectId, authLoading } = useSubject();
   const trust = useTrustState(walletAddress);
   const runtime = useAgentRuntime(subjectId, walletAddress);
   const showAgent = Boolean(subjectId) && runtime.agent_access;
@@ -67,14 +61,10 @@ export function AgentChatPage(): React.ReactElement {
             endpoint="/api/agent/seller"
             title="Seller Agent"
             placeholder="e.g., Improve my best-selling listing copy"
-            requestHeaders={() =>
-              subjectId
-                ? {
-                    'X-User-Id': subjectId,
-                    ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
-                  }
-                : {}
-            }
+            requestHeaders={() => ({
+              'X-User-Id': subjectId!,
+              ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+            })}
           />
         ) : null}
       </div>

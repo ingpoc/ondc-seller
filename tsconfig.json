@@ -15,7 +15,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@portfolio-ui": ["../shared/portfolio-ui/src/index.tsx"],
+      "@portfolio-ui": ["./src/portfolio-ui/index.tsx"],
       "@ondc-sdk/shared": ["./src/types/index.ts"],
       "react": ["./node_modules/@types/react/index.d.ts"],
       "react-dom": ["./node_modules/@types/react-dom/index.d.ts"],

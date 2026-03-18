@@ -8,10 +8,13 @@ import { AgentChatPage } from './pages/AgentChatPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { ConfigPage } from './pages/ConfigPage';
+import { useAgentEntitlement } from './hooks/useAgentEntitlement';
 import { useTrustState } from './hooks/useTrustState';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { useAuthContext } from '@/contexts/AuthContext';
 import { TrustStatusChip } from './components/TrustStatus';
+import { SubscriptionStatusChip } from './components/SubscriptionStatusChip';
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -54,8 +57,11 @@ export function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const { publicKey } = useWallet();
+  const { user } = useAuthContext();
   const walletAddress = publicKey?.toBase58() ?? null;
+  const subjectId = user?.wallet_address ?? walletAddress;
   const trust = useTrustState(walletAddress);
+  const entitlement = useAgentEntitlement(subjectId, walletAddress);
 
   const handleSearch = (query: string) => {
     navigate(`/catalog?q=${encodeURIComponent(query)}`);
@@ -84,6 +90,9 @@ export function App() {
       headerSearch={<RollingSearch onSearch={handleSearch} />}
       actions={
         <Fragment>
+          {subjectId ? (
+            <SubscriptionStatusChip status={entitlement.subscription_status} loading={entitlement.loading} />
+          ) : null}
           {walletAddress ? (
             <TrustStatusChip state={trust.state} loading={trust.loading} />
           ) : null}

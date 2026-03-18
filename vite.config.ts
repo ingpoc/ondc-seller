@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@portfolio-ui': path.resolve(__dirname, './src/portfolio-ui/index.tsx'),
+      '@portfolio-ui': path.resolve(__dirname, '../shared/portfolio-ui/src/index.tsx'),
       react: path.resolve(__dirname, './node_modules/react'),
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
       'react/jsx-runtime': path.resolve(__dirname, './node_modules/react/jsx-runtime.js'),
@@ -20,6 +20,8 @@ export default defineConfig({
   server: {
     port: 3003,
     proxy: {
+      '/api/entitlements': 'http://localhost:8100',
+      '/api/agent': 'http://localhost:8100',
       '/api': 'http://localhost:3001',
       '/on_search': 'http://localhost:3001',
     },

@@ -15,6 +15,11 @@ import {
   GRID,
 } from '@portfolio-ui';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import {
+  acceptDemoSellerOrder,
+  listDemoSellerOrders,
+  rejectDemoSellerOrder,
+} from '../lib/localSellerOrders';
 
 // Order status grouping for seller
 const isPendingStatus = (status: UCPOrderStatus): boolean => status === 'created';
@@ -253,7 +258,7 @@ export function OrdersPage() {
     setError(null);
     try {
       if (COMMERCE_DEMO_MODE) {
-        setOrders([]);
+        setOrders(listDemoSellerOrders());
         return;
       }
 
@@ -279,9 +284,11 @@ export function OrdersPage() {
       setProcessing(orderId);
       try {
         if (COMMERCE_DEMO_MODE) {
-          setOrders((current) => current.map((order) => (
-            order.id === orderId ? { ...order, status: 'accepted' } : order
-          )));
+          const next = acceptDemoSellerOrder(orderId);
+          if (!next) {
+            throw new Error('Order not found');
+          }
+          setOrders(listDemoSellerOrders());
           return;
         }
 
@@ -310,19 +317,11 @@ export function OrdersPage() {
       setProcessing(orderId);
       try {
         if (COMMERCE_DEMO_MODE) {
-          setOrders((current) => current.map((order) => (
-            order.id === orderId
-              ? {
-                  ...order,
-                  status: 'cancelled',
-                  cancellation: {
-                    cancelledAt: new Date().toISOString(),
-                    cancelledBy: 'seller',
-                    reason: 'Seller rejected',
-                  },
-                }
-              : order
-          )));
+          const next = rejectDemoSellerOrder(orderId, 'Seller rejected');
+          if (!next) {
+            throw new Error('Order not found');
+          }
+          setOrders(listDemoSellerOrders());
           return;
         }
 

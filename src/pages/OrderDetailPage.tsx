@@ -13,6 +13,13 @@ import {
   COLORS,
 } from '@portfolio-ui';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import {
+  acceptDemoSellerOrder,
+  dispatchDemoSellerOrder,
+  getDemoSellerOrder,
+  listSellerOrderNotesForOrder,
+  rejectDemoSellerOrder,
+} from '../lib/localSellerOrders';
 
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
@@ -175,6 +182,7 @@ export function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const orderNotes = order ? listSellerOrderNotesForOrder(order.id) : [];
 
   useEffect(() => {
     const loadOrder = async () => {
@@ -186,7 +194,12 @@ export function OrderDetailPage() {
 
       try {
         if (COMMERCE_DEMO_MODE) {
-          throw new Error('Order not found');
+          const demoOrder = getDemoSellerOrder(id);
+          if (!demoOrder) {
+            throw new Error('Order not found');
+          }
+          setOrder(demoOrder);
+          return;
         }
 
         const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`));
@@ -208,7 +221,12 @@ export function OrderDetailPage() {
     setProcessing('accept');
     try {
       if (COMMERCE_DEMO_MODE) {
-        throw new Error('Order actions are unavailable in local demo mode');
+        const next = acceptDemoSellerOrder(id);
+        if (!next) {
+          throw new Error('Order not found');
+        }
+        setOrder(next);
+        return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
@@ -231,7 +249,12 @@ export function OrderDetailPage() {
     setProcessing('reject');
     try {
       if (COMMERCE_DEMO_MODE) {
-        throw new Error('Order actions are unavailable in local demo mode');
+        const next = rejectDemoSellerOrder(id, 'Seller rejected the order');
+        if (!next) {
+          throw new Error('Order not found');
+        }
+        setOrder(next);
+        return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
@@ -257,7 +280,12 @@ export function OrderDetailPage() {
     setProcessing('dispatch');
     try {
       if (COMMERCE_DEMO_MODE) {
-        throw new Error('Order actions are unavailable in local demo mode');
+        const next = dispatchDemoSellerOrder(id, trackingId);
+        if (!next) {
+          throw new Error('Order not found');
+        }
+        setOrder(next);
+        return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
@@ -499,6 +527,35 @@ export function OrderDetailPage() {
           ))}
         </div>
       </div>
+
+      {orderNotes.length > 0 ? (
+        <div style={SECTION_CARD_STYLE}>
+          <h3 style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.md} 0` }}>Seller Follow-up Notes</h3>
+          <div style={{ display: 'grid', gap: SPACING.md }}>
+            {orderNotes.map((note) => (
+              <div
+                key={note.id}
+                style={{
+                  border: `1px solid ${DRAMS.grayTrack}`,
+                  borderRadius: RADIUS.md,
+                  padding: SPACING.md,
+                  backgroundColor: 'white',
+                }}
+              >
+                <p style={{ ...TYPOGRAPHY.body, margin: 0 }}>{note.note}</p>
+                {note.next_step ? (
+                  <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: `${SPACING.xs} 0 0 0` }}>
+                    Next step: {note.next_step}
+                  </p>
+                ) : null}
+                <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: `${SPACING.xs} 0 0 0` }}>
+                  {new Date(note.created_at).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {order.fulfillment?.tracking && (
         <div style={SECTION_CARD_STYLE}>

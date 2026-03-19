@@ -5,28 +5,11 @@ import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
-
-// Seller client configuration interface
-interface SellerClientConfig {
-  /** ONDC gateway base URL */
-  baseUrl: string;
-  /** Subscriber ID (e.g., "ondc.example.com") */
-  subscriberId: string;
-  /** Base64 encoded Ed25519 private key */
-  privateKey: string;
-  /** Unique key identifier */
-  keyId?: string;
-  /** Default domain for requests */
-  domain?: string;
-  /** Default country code */
-  country?: string;
-  /** Default city code */
-  city?: string;
-  /** Request timeout in milliseconds */
-  timeout?: number;
-}
-
-const LOCAL_CONFIG_STORAGE_KEY = 'ondc-seller-local-config';
+import {
+  readLocalSellerConfig,
+  saveLocalSellerConfig,
+  type SellerClientConfig,
+} from '../lib/localSellerConfig';
 
 interface ConfigError {
   field: string;
@@ -55,23 +38,6 @@ const HELPER_TEXT_STYLE = {
   ...TYPOGRAPHY.bodySmall,
   color: DRAMS.textLight,
 };
-
-function readLocalConfig(): Partial<SellerClientConfig> | null {
-  const raw = localStorage.getItem(LOCAL_CONFIG_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as Partial<SellerClientConfig>;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalConfig(config: SellerClientConfig) {
-  localStorage.setItem(LOCAL_CONFIG_STORAGE_KEY, JSON.stringify(config));
-}
 
 function createDemoPrivateKey(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -107,7 +73,7 @@ export function ConfigPage() {
     setLoading(true);
     try {
       if (COMMERCE_DEMO_MODE) {
-        const localConfig = readLocalConfig();
+        const localConfig = readLocalSellerConfig();
         if (localConfig) {
           setConfig((prev: SellerClientConfig) => ({ ...prev, ...localConfig }));
         }
@@ -165,7 +131,7 @@ export function ConfigPage() {
     setLoading(true);
     try {
       if (COMMERCE_DEMO_MODE) {
-        saveLocalConfig(config);
+        saveLocalSellerConfig(config);
         setTestResult({ success: true, message: 'Configuration saved locally for browser testing' });
         return;
       }

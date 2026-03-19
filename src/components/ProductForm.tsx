@@ -21,6 +21,7 @@ export interface ProductFormData {
 
 export interface ProductFormProps {
   product?: BecknItem;
+  initialData?: ProductFormData | null;
   onSubmit: (data: ProductFormData) => Promise<void>;
   onCancel: () => void;
   loading?: boolean;
@@ -39,7 +40,11 @@ const CURRENCY_OPTIONS = [
   { value: 'EUR', label: 'EUR' },
 ] as const;
 
-function buildFormData(product?: BecknItem): ProductFormData {
+function buildFormData(product?: BecknItem, initialData?: ProductFormData | null): ProductFormData {
+  if (initialData) {
+    return initialData;
+  }
+
   return {
     id: product?.id || `item-${Date.now()}`,
     name: product?.descriptor?.name || '',
@@ -80,12 +85,12 @@ function Field({
   );
 }
 
-export function ProductForm({ product, onSubmit, onCancel, loading }: ProductFormProps) {
-  const [formData, setFormData] = useState<ProductFormData>(() => buildFormData(product));
+export function ProductForm({ product, initialData, onSubmit, onCancel, loading }: ProductFormProps) {
+  const [formData, setFormData] = useState<ProductFormData>(() => buildFormData(product, initialData));
 
   useEffect(() => {
-    setFormData(buildFormData(product));
-  }, [product]);
+    setFormData(buildFormData(product, initialData));
+  }, [product, initialData]);
 
   const handleInputChange =
     (field: keyof ProductFormData) =>

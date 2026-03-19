@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { ProductForm } from '../components';
 import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { upsertDemoCatalogItem } from '../lib/mockCatalog';
+import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import {
   PageLayout,
   PageHeader,
@@ -33,11 +34,16 @@ const ERROR_STYLE = {
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isNew = !id;
+  const shouldUseAgentDraft = searchParams.get('draft') === 'agent';
 
   const { data: existingProduct, execute } = useApi<BecknItem>(
     isNew ? '/api/catalog' : `/api/catalog/products/${id}`
   );
+  const draftData = shouldUseAgentDraft
+    ? getDraftFormDataForRoute({ isNew, itemId: id ?? null })
+    : null;
 
   useEffect(() => {
     if (!isNew) {
@@ -76,6 +82,7 @@ export function ProductEditPage() {
 
         if (COMMERCE_DEMO_MODE) {
           upsertDemoCatalogItem(payload as BecknItem);
+          clearConsumedSellerDraft(isNew ? null : id ?? null);
           navigate('/catalog');
           return;
         }
@@ -93,6 +100,7 @@ export function ProductEditPage() {
           throw new Error('Failed to save product');
         }
 
+        clearConsumedSellerDraft(isNew ? null : id ?? null);
         navigate('/catalog');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -128,6 +136,7 @@ export function ProductEditPage() {
       <div style={CARD_STYLE}>
         <ProductForm
           product={existingProduct ?? undefined}
+          initialData={draftData}
           onSubmit={handleSubmit}
           onCancel={handleCancel}
           loading={loading}

@@ -1,5 +1,7 @@
 # ONDC UCP Seller Portal
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/openclaw-gurusharan/ondc-seller)
+
 Seller web application for ONDC (Open Network for Digital Commerce) Unified Commerce Platform integration.
 
 ## Overview
@@ -54,7 +56,7 @@ VITE_API_BASE_URL=http://localhost:3001
 ## Development
 
 ```bash
-# Start dev server (port 3002)
+# Start dev server (port 43103)
 pnpm dev
 
 # Type check

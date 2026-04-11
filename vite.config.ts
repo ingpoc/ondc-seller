@@ -18,7 +18,8 @@ export default defineConfig({
     exclude: [],
   },
   server: {
-    port: 3003,
+    strictPort: true,
+    port: 43103,
     proxy: {
       '/api/entitlements': 'http://localhost:8100',
       '/api/agent': 'http://localhost:8100',

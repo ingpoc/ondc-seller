@@ -34,7 +34,7 @@ ONDC UCP Seller Portal - Private seller webapp
 | Command | Purpose |
 |---------|---------|
 | `pnpm install` | Install dependencies |
-| `pnpm dev` | Start dev server (port 3002) |
+| `pnpm dev` | Start dev server (port 43103) |
 | `pnpm build` | Production build |
 | `pnpm preview` | Preview production build |
 | `pnpm test` | Run tests |
@@ -49,7 +49,7 @@ ONDC UCP Seller Portal - Private seller webapp
 ## Development
 
 1. `pnpm install` → `pnpm dev`
-2. Open `http://localhost:3002`
+2. Open `http://127.0.0.1:43103`
 3. Hot reload enabled
 4. Source maps for debugging
 

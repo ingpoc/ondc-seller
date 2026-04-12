@@ -532,6 +532,8 @@ export function AgentChatPage(): JSX.Element {
                   <div className="flex items-end gap-3">
                     <Textarea
                       value={input}
+                      aria-label="Seller agent prompt"
+                      name="seller-agent-prompt"
                       onChange={(event) => setInput(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' && !event.shiftKey) {
@@ -548,6 +550,7 @@ export function AgentChatPage(): JSX.Element {
                       className="h-12 w-12 shrink-0"
                       onClick={() => void sendMessage()}
                       disabled={!input.trim() || isLoading}
+                      aria-label={isLoading ? 'Seller agent is responding' : 'Send seller agent prompt'}
                     >
                       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                     </Button>

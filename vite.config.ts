@@ -18,6 +18,7 @@ export default defineConfig({
     exclude: [],
   },
   server: {
+    host: '127.0.0.1',
     strictPort: true,
     port: 43103,
     proxy: {

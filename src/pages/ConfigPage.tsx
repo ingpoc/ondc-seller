@@ -84,7 +84,9 @@ export function ConfigPage() {
         return;
       }
 
-      const response = await fetch(buildCommerceUrl('/api/seller/config'));
+      const response = await fetch(buildCommerceUrl('/api/seller/config'), {
+        credentials: 'include',
+      });
       if (response.ok) {
         const data = await response.json();
         if (data.config) {
@@ -145,6 +147,7 @@ export function ConfigPage() {
 
       const response = await fetch(buildCommerceUrl('/api/seller/config'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
@@ -182,6 +185,7 @@ export function ConfigPage() {
 
       const response = await fetch(buildCommerceUrl('/api/seller/config/generate-keys'), {
         method: 'POST',
+        credentials: 'include',
       });
       if (!response.ok) {
         throw new Error('Failed to generate key pair');
@@ -226,6 +230,7 @@ export function ConfigPage() {
 
       const response = await fetch(buildCommerceUrl('/api/seller/config/test'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config }),
       });

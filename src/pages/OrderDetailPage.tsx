@@ -130,7 +130,9 @@ export function OrderDetailPage() {
           return;
         }
 
-        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`));
+        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`), {
+          credentials: 'include',
+        });
         if (!response.ok) throw new Error('Order not found');
         const data = await response.json();
         setOrder(data.order);
@@ -157,6 +159,7 @@ export function OrderDetailPage() {
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
         method: 'POST',
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to accept order');
       const data = await response.json();
@@ -183,6 +186,7 @@ export function OrderDetailPage() {
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
       });
@@ -212,6 +216,7 @@ export function OrderDetailPage() {
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
       });

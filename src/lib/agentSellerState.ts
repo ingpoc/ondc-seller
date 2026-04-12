@@ -1,6 +1,6 @@
 import type { BecknItem, UCPOrder } from '@ondc-sdk/shared';
 import type { ProductFormData } from '@/components/ProductForm';
-import { getDemoCatalogItems, upsertDemoCatalogItem } from './mockCatalog';
+import { getDemoCatalogItems, saveDemoCatalogItems } from './mockCatalog';
 import { getLocalSellerConfigSummary } from './localSellerConfig';
 import { clearSellerAgentDraft, readSellerAgentDraft, saveSellerAgentDraft } from './localSellerDraft';
 import {
@@ -441,7 +441,6 @@ export function applySellerAgentEnvelope(
       } else {
         nextCatalog.unshift(patched);
       }
-      upsertDemoCatalogItem(patched);
       continue;
     }
 
@@ -486,6 +485,8 @@ export function applySellerAgentEnvelope(
       continue;
     }
   }
+
+  saveDemoCatalogItems(nextCatalog);
 
   const pendingDraft = readSellerAgentDraft()?.draft ?? null;
   return {

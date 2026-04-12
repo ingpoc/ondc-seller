@@ -88,6 +88,7 @@ export function useAgentRuntime(subjectId?: string | null, walletAddress?: strin
         setLoading(true);
         setError(null);
         const response = await fetch('/api/agent/runtime?app=ondc-seller', {
+          credentials: 'include',
           headers: {
             'X-User-Id': subjectId,
             ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),

@@ -304,6 +304,7 @@ export function AgentChatPage(): JSX.Element {
     try {
       const response = await fetch('/api/agent/seller', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'X-User-Id': subjectId,
@@ -439,8 +440,8 @@ export function AgentChatPage(): JSX.Element {
 
       try {
         const [catalogResponse, ordersResponse] = await Promise.all([
-          fetch(buildCommerceUrl('/api/catalog')),
-          fetch(buildCommerceUrl('/api/seller/orders')),
+          fetch(buildCommerceUrl('/api/catalog'), { credentials: 'include' }),
+          fetch(buildCommerceUrl('/api/seller/orders'), { credentials: 'include' }),
         ]);
 
         if (!cancelled) {

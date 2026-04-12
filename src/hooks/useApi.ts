@@ -32,7 +32,9 @@ export function useApi<T>(url: string): UseApiResult<T> {
         }
       }
 
-      const response = await fetch(buildCommerceUrl(url));
+      const response = await fetch(buildCommerceUrl(url), {
+        credentials: 'include',
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

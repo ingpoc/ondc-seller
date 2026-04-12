@@ -201,7 +201,9 @@ export function OrdersPage() {
         return;
       }
 
-      const response = await fetch(buildCommerceUrl('/api/seller/orders'));
+      const response = await fetch(buildCommerceUrl('/api/seller/orders'), {
+        credentials: 'include',
+      });
       if (!response.ok) {
         throw new Error('Failed to load orders');
       }
@@ -233,6 +235,7 @@ export function OrdersPage() {
 
         const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
           method: 'POST',
+          credentials: 'include',
         });
         if (!response.ok) {
           throw new Error('Failed to accept order');
@@ -266,6 +269,7 @@ export function OrdersPage() {
 
         const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: 'Seller rejected' }),
         });

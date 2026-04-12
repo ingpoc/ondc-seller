@@ -8,28 +8,11 @@ import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { upsertDemoCatalogItem } from '../lib/mockCatalog';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import {
+  Alert,
+  Card,
   PageLayout,
   PageHeader,
-  CARD,
-  SPACING,
-  TYPOGRAPHY,
-  RADIUS,
-} from '@portfolio-ui';
-
-const CARD_STYLE = {
-  ...CARD.base,
-  padding: SPACING['3xl'],
-};
-
-const ERROR_STYLE = {
-  padding: `${SPACING.md} ${SPACING.lg}`,
-  borderRadius: RADIUS.lg,
-  backgroundColor: '#fef2f2',
-  border: '1px solid #fecaca',
-  color: '#dc2626',
-  ...TYPOGRAPHY.bodySmall,
-  marginBottom: SPACING.xl,
-};
+} from '@/components/seller-ui';
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -127,13 +110,10 @@ export function ProductEditPage() {
       />
 
       {error && (
-        <div style={ERROR_STYLE}>
-          <p style={{ margin: 0, fontWeight: TYPOGRAPHY.label.fontWeight }}>Error</p>
-          <p style={{ margin: '4px 0 0 0' }}>{error}</p>
-        </div>
+        <Alert tone="error" title="Unable to save product" description={error} className="mb-6" />
       )}
 
-      <div style={CARD_STYLE}>
+      <Card className="px-8">
         <ProductForm
           product={existingProduct ?? undefined}
           initialData={draftData}
@@ -141,7 +121,7 @@ export function ProductEditPage() {
           onCancel={handleCancel}
           loading={loading}
         />
-      </div>
+      </Card>
     </PageLayout>
   );
 }

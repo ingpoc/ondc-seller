@@ -8,7 +8,7 @@ import {
   Input,
   Textarea,
   DramsDropdown,
-} from '@portfolio-ui';
+} from '@/components/seller-ui';
 
 export interface ProductFormData {
   id: string;
@@ -180,7 +180,7 @@ export function ProductForm({ product, initialData, onSubmit, onCancel, loading 
         </Field>
       </FormLayout>
 
-      <Card className="space-y-3 bg-[rgba(246,244,239,0.7)]">
+      <Card className="space-y-3 bg-secondary/60">
         <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
           Listing preview
         </div>

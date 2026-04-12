@@ -4,7 +4,7 @@ import {
   Badge,
   Button,
   DataTableLayout,
-} from '@portfolio-ui';
+} from '@/components/seller-ui';
 
 export interface InventoryTableProps {
   items: BecknItem[];
@@ -60,7 +60,7 @@ export function InventoryTable({ items, onEdit, onDelete }: InventoryTableProps)
             return (
               <tr
                 key={item.id}
-                className="border-b border-[var(--ui-border)] transition-colors duration-150 hover:bg-[rgba(16,16,16,0.02)]"
+                className="border-b border-[var(--ui-border)] transition-colors duration-150 hover:bg-muted/40"
               >
                 <td className="px-4 py-4 align-top">
                   <div className="flex items-start gap-3">

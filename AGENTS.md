@@ -1,23 +1,10 @@
 # AGENTS.md
 
-## Inheritance Contract
+## Instruction Inheritance
 
-- Global baseline: `Organization` published baseline from `/Users/gurusharan/Documents/Organization/reports/publish/publish-manifest.json`
-- Workspace parent: `../AGENTS.md`
 - Read `../AGENTS.md` first for portfolio-wide governance.
 - This file adds only `ondc-seller`-specific execution guidance.
-- Organization routing: `inherits_by_default`
-- Local policy authority: `AGENTS.md`
-- Local CLAUDE policy: `defer_to_agents`
 - If this file conflicts with the root workspace `AGENTS.md`, the root file wins unless it explicitly allows a repo-local exception.
-
-## Browser Testing
-
-- BEFORE browser testing ONDC Seller -> read `../docs/workflow/browser-testing-control-plane.md`
-- BEFORE validating the same-user portfolio journey -> read `../docs/workflow/portfolio-browser-acceptance-loop.md`
-- Browser testing for this repo should happen after AadhaarChain trust state is confirmed, because seller catalog and config flows are trust-gated.
-- Critical browser routes for this repo: `/dashboard`, `/catalog`, `/catalog/new`, `/catalog/:id`, `/orders`, `/orders/:id`, `/config`, `/agent`
-- When local catalog data falls back to mocks, capture the failed network requests separately from the visible shell behavior.
 
 ONDC UCP Seller Portal - Private seller webapp
 
@@ -34,7 +21,7 @@ ONDC UCP Seller Portal - Private seller webapp
 | Command | Purpose |
 |---------|---------|
 | `pnpm install` | Install dependencies |
-| `pnpm dev` | Start dev server (port 43103) |
+| `pnpm dev` | Start dev server (port 3002) |
 | `pnpm build` | Production build |
 | `pnpm preview` | Preview production build |
 | `pnpm test` | Run tests |
@@ -49,7 +36,7 @@ ONDC UCP Seller Portal - Private seller webapp
 ## Development
 
 1. `pnpm install` → `pnpm dev`
-2. Open `http://127.0.0.1:43103`
+2. Open `http://localhost:3002`
 3. Hot reload enabled
 4. Source maps for debugging
 

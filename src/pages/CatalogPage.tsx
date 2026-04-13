@@ -15,6 +15,8 @@ import { useApi } from '../hooks/useApi';
 import { useTrustState } from '../hooks/useTrustState';
 import { InventoryTable } from '../components';
 import { TrustNotice } from '../components/TrustStatus';
+import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { deleteDemoCatalogItem } from '../lib/mockCatalog';
 
 type CatalogItem = BecknItem & {
   descriptor?: BecknItem['descriptor'] & {
@@ -96,6 +98,36 @@ export function CatalogPage() {
 
     navigate('/catalog/new');
   }, [navigate, trustBlocksCatalog]);
+
+  const handleDelete = useCallback(
+    async (itemId: string) => {
+      if (trustBlocksCatalog) {
+        return;
+      }
+
+      const confirmed = window.confirm('Delete this product from the catalog?');
+      if (!confirmed) {
+        return;
+      }
+
+      if (COMMERCE_DEMO_MODE) {
+        deleteDemoCatalogItem(itemId);
+        await execute();
+        return;
+      }
+
+      const response = await fetch(buildCommerceUrl(`/api/catalog/products/${itemId}`), {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete product ${itemId}`);
+      }
+
+      await execute();
+    },
+    [execute, trustBlocksCatalog]
+  );
 
   return (
     <PageLayout>
@@ -267,7 +299,9 @@ export function CatalogPage() {
             <InventoryTable
               items={filteredItems}
               onEdit={handleEdit}
-              onDelete={(id) => console.log('Delete', id)}
+              onDelete={(id) => {
+                void handleDelete(id);
+              }}
             />
           </Section>
         </>

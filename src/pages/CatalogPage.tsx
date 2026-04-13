@@ -10,7 +10,7 @@ import {
   PageLayout,
   Section,
   StatCard,
-} from '@portfolio-ui';
+} from '@/components/seller-ui';
 import { useApi } from '../hooks/useApi';
 import { useTrustState } from '../hooks/useTrustState';
 import { InventoryTable } from '../components';
@@ -239,7 +239,7 @@ export function CatalogPage() {
                     className="group cursor-pointer overflow-hidden p-0 transition-all duration-150 hover:-translate-y-1 hover:shadow-[var(--ui-shadow-md)]"
                     onClick={() => handleEdit(item)}
                   >
-                    <div className="relative h-48 overflow-hidden bg-[linear-gradient(135deg,#efe6d6_0%,#ded8ca_100%)]">
+                    <div className="relative h-48 overflow-hidden bg-secondary/70">
                       <div className="absolute left-4 top-4 z-10">
                         <Badge tone="info">{formatCategory(item.category_id)}</Badge>
                       </div>

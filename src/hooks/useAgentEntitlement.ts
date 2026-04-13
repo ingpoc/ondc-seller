@@ -20,7 +20,7 @@ const DEFAULT_RUNTIME: AgentRuntimeSnapshot = {
   allowed_capabilities: [],
   blocked_reason: 'Authentication required.',
 };
-const LOCAL_AGENT_RUNTIME_ENABLED = import.meta.env.VITE_AGENT_RUNTIME_ENABLED !== 'false';
+const AGENT_RUNTIME_ENABLED = import.meta.env.VITE_AGENT_RUNTIME_ENABLED !== 'false';
 
 function isUsageSnapshot(value: unknown): value is AgentRuntimeSnapshot['usage'] {
   if (!value || typeof value !== 'object') {
@@ -69,10 +69,12 @@ export function useAgentRuntime(subjectId?: string | null, walletAddress?: strin
       return;
     }
 
-    if (import.meta.env.DEV && !LOCAL_AGENT_RUNTIME_ENABLED) {
+    if (!AGENT_RUNTIME_ENABLED) {
       setSnapshot({
         ...DEFAULT_RUNTIME,
-        blocked_reason: 'Local agent runtime backend is not configured for browser validation.',
+        blocked_reason: import.meta.env.DEV
+          ? 'Local agent runtime backend is not configured for browser validation.'
+          : 'Agent runtime is disabled for this deployment.',
       });
       setLoading(false);
       setError(null);
@@ -86,6 +88,7 @@ export function useAgentRuntime(subjectId?: string | null, walletAddress?: strin
         setLoading(true);
         setError(null);
         const response = await fetch('/api/agent/runtime?app=ondc-seller', {
+          credentials: 'include',
           headers: {
             'X-User-Id': subjectId,
             ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),

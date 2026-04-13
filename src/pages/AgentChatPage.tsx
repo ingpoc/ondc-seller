@@ -9,7 +9,7 @@ import {
   PageLayout,
   PageHeader,
   Textarea,
-} from '@portfolio-ui';
+} from '@/components/seller-ui';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import type { BecknItem, UCPOrder } from '@ondc-sdk/shared';
 import { useAgentRuntime, useSubject, useTrustState } from '@/hooks';
@@ -304,6 +304,7 @@ export function AgentChatPage(): JSX.Element {
     try {
       const response = await fetch('/api/agent/seller', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'X-User-Id': subjectId,
@@ -439,8 +440,8 @@ export function AgentChatPage(): JSX.Element {
 
       try {
         const [catalogResponse, ordersResponse] = await Promise.all([
-          fetch(buildCommerceUrl('/api/catalog')),
-          fetch(buildCommerceUrl('/api/seller/orders')),
+          fetch(buildCommerceUrl('/api/catalog'), { credentials: 'include' }),
+          fetch(buildCommerceUrl('/api/seller/orders'), { credentials: 'include' }),
         ]);
 
         if (!cancelled) {
@@ -532,6 +533,8 @@ export function AgentChatPage(): JSX.Element {
                   <div className="flex items-end gap-3">
                     <Textarea
                       value={input}
+                      aria-label="Seller agent prompt"
+                      name="seller-agent-prompt"
                       onChange={(event) => setInput(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' && !event.shiftKey) {
@@ -548,6 +551,7 @@ export function AgentChatPage(): JSX.Element {
                       className="h-12 w-12 shrink-0"
                       onClick={() => void sendMessage()}
                       disabled={!input.trim() || isLoading}
+                      aria-label={isLoading ? 'Seller agent is responding' : 'Send seller agent prompt'}
                     >
                       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                     </Button>
@@ -557,7 +561,7 @@ export function AgentChatPage(): JSX.Element {
             >
               <div className="space-y-3">
                 {messages.length === 0 ? (
-                  <Card className="bg-[rgba(246,244,239,0.72)]">
+                  <Card className="bg-secondary/60">
                     <div className="text-sm text-[var(--ui-text-secondary)]">
                       Start with a concrete seller task such as improving a listing, drafting a new catalog entry, or adding a follow-up note to an order.
                     </div>
@@ -569,9 +573,9 @@ export function AgentChatPage(): JSX.Element {
                     key={`${message.timestamp}-${index}`}
                     className={
                       message.role === 'user'
-                        ? 'ml-auto max-w-[80%] bg-[rgba(234,106,42,0.1)]'
+                        ? 'ml-auto max-w-[80%] bg-primary/10'
                         : message.role === 'error'
-                          ? 'border-[rgba(194,65,12,0.2)] bg-[rgba(194,65,12,0.06)]'
+                          ? 'border-destructive/20 bg-destructive/5'
                           : 'max-w-[88%]'
                     }
                   >

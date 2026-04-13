@@ -1,17 +1,10 @@
-import { useState, useEffect, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
-import {
-  PageLayout,
-  PageHeader,
-  DRAMS,
-  SPACING,
-  TYPOGRAPHY,
-  RADIUS,
-  BUTTON,
-  CARD,
-  COLORS,
-} from '@portfolio-ui';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
@@ -26,28 +19,30 @@ const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created'
 const canDispatchOrder = (status: UCPOrderStatus): boolean =>
   ['accepted', 'packed'].includes(status);
 
-const getStatusLabel = (status: UCPOrderStatus): string => {
-  const labels: Record<UCPOrderStatus, string> = {
-    created: 'Pending',
-    accepted: 'Accepted',
-    in_progress: 'In Progress',
-    packed: 'Packed',
-    shipped: 'Dispatched',
-    out_for_delivery: 'Out for Delivery',
-    delivered: 'Delivered',
-    cancelled: 'Cancelled',
-    returned: 'Returned',
-  };
-  return labels[status] || status;
+const STATUS_LABELS: Record<UCPOrderStatus, string> = {
+  created: 'Pending',
+  accepted: 'Accepted',
+  in_progress: 'In progress',
+  packed: 'Packed',
+  shipped: 'Dispatched',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  returned: 'Returned',
 };
 
-const getStatusColor = (status: UCPOrderStatus): string => {
-  if (status === 'cancelled' || status === 'returned') return COLORS.error;
-  if (status === 'delivered') return DRAMS.orange;
-  if (status === 'created') return DRAMS.textDark;
-  if (['accepted', 'packed'].includes(status)) return DRAMS.orange;
-  return DRAMS.orange;
-};
+function getStatusTone(status: UCPOrderStatus) {
+  if (status === 'cancelled' || status === 'returned') {
+    return 'bg-destructive/12 text-destructive';
+  }
+  if (status === 'delivered') {
+    return 'bg-primary/12 text-primary';
+  }
+  if (status === 'created') {
+    return 'bg-secondary text-secondary-foreground';
+  }
+  return 'bg-accent text-accent-foreground';
+}
 
 interface TimelineEvent {
   status: string;
@@ -56,11 +51,11 @@ interface TimelineEvent {
   completed: boolean;
 }
 
-const getOrderTimeline = (order: UCPOrder): TimelineEvent[] => {
+function getOrderTimeline(order: UCPOrder): TimelineEvent[] {
   const events: TimelineEvent[] = [
     {
       status: 'created',
-      label: 'Order Placed',
+      label: 'Order placed',
       timestamp: order.createdAt,
       completed: true,
     },
@@ -70,110 +65,43 @@ const getOrderTimeline = (order: UCPOrder): TimelineEvent[] => {
     order.status === 'accepted' ||
     ['accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status)
   ) {
-    events.push({
-      status: 'accepted',
-      label: 'Order Accepted',
-      completed: true,
-    });
+    events.push({ status: 'accepted', label: 'Order accepted', completed: true });
   }
 
   if (order.fulfillment?.status === 'in_transit' || order.status === 'shipped') {
-    events.push({
-      status: 'packed',
-      label: 'Order Packed',
-      completed: true,
-    });
+    events.push({ status: 'packed', label: 'Order packed', completed: true });
   }
 
   if (order.status === 'shipped' || order.fulfillment?.status === 'in_transit') {
-    events.push({
-      status: 'shipped',
-      label: 'Order Dispatched',
-      completed: true,
-    });
+    events.push({ status: 'shipped', label: 'Order dispatched', completed: true });
   }
 
   if (order.status === 'cancelled') {
     events.push({
       status: 'cancelled',
-      label: 'Order Cancelled',
+      label: 'Order cancelled',
       timestamp: order.cancellation?.cancelledAt,
       completed: true,
     });
   }
 
+  if (order.status === 'delivered') {
+    events.push({ status: 'delivered', label: 'Order delivered', completed: true });
+  }
+
   return events;
-};
+}
 
-const BACK_BUTTON_STYLE: CSSProperties = {
-  ...BUTTON.secondary,
-  padding: `${SPACING.sm} ${SPACING.lg}`,
-  marginBottom: SPACING.md,
-};
-
-const STATUS_BADGE_STYLE: CSSProperties = {
-  padding: `${SPACING.sm} ${SPACING.lg}`,
-  borderRadius: RADIUS.md,
-  ...TYPOGRAPHY.label,
-  textTransform: 'capitalize' as const,
-};
-
-const ACTIONS_CARD_STYLE: CSSProperties = {
-  ...CARD.base,
-  marginBottom: SPACING.xl,
-  display: 'flex',
-  gap: SPACING.md,
-  flexWrap: 'wrap' as const,
-};
-
-const SECTION_CARD_STYLE: CSSProperties = {
-  ...CARD.base,
-  marginBottom: SPACING.xl,
-};
-
-const SECTION_TITLE_STYLE: CSSProperties = {
-  ...TYPOGRAPHY.h3,
-  margin: `0 0 ${SPACING.md} 0`,
-};
-
-const ITEM_ROW_STYLE: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  padding: SPACING.md,
-  borderRadius: RADIUS.md,
-  border: `1px solid ${DRAMS.grayTrack}`,
-  backgroundColor: 'white',
-  marginBottom: SPACING.sm,
-};
-
-const TIMELINE_STYLE: CSSProperties = {
-  position: 'relative' as const,
-};
-
-const TIMELINE_LINE_STYLE: CSSProperties = {
-  position: 'absolute' as const,
-  left: '8px',
-  top: 0,
-  bottom: 0,
-  width: '2px',
-  backgroundColor: DRAMS.grayTrack,
-};
-
-const TIMELINE_EVENT_STYLE: CSSProperties = {
-  position: 'relative' as const,
-  paddingLeft: SPACING['3xl'],
-  paddingBottom: SPACING.xl,
-};
-
-const TIMELINE_DOT_STYLE: CSSProperties = {
-  position: 'absolute' as const,
-  left: 0,
-  top: '4px',
-  width: '18px',
-  height: '18px',
-  borderRadius: RADIUS.circle,
-  border: '2px solid white',
-};
+function formatDate(value?: string) {
+  if (!value) return 'Not available';
+  return new Date(value).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -202,7 +130,9 @@ export function OrderDetailPage() {
           return;
         }
 
-        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`));
+        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`), {
+          credentials: 'include',
+        });
         if (!response.ok) throw new Error('Order not found');
         const data = await response.json();
         setOrder(data.order);
@@ -213,24 +143,23 @@ export function OrderDetailPage() {
       }
     };
 
-    loadOrder();
+    void loadOrder();
   }, [id]);
 
-  const handleAccept = async () => {
+  async function handleAccept() {
     if (!order || !id) return;
     setProcessing('accept');
     try {
       if (COMMERCE_DEMO_MODE) {
         const next = acceptDemoSellerOrder(id);
-        if (!next) {
-          throw new Error('Order not found');
-        }
+        if (!next) throw new Error('Order not found');
         setOrder(next);
         return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
         method: 'POST',
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to accept order');
       const data = await response.json();
@@ -240,9 +169,9 @@ export function OrderDetailPage() {
     } finally {
       setProcessing(null);
     }
-  };
+  }
 
-  const handleReject = async () => {
+  async function handleReject() {
     if (!order || !id) return;
     if (!confirm('Are you sure you want to reject this order?')) return;
 
@@ -250,15 +179,14 @@ export function OrderDetailPage() {
     try {
       if (COMMERCE_DEMO_MODE) {
         const next = rejectDemoSellerOrder(id, 'Seller rejected the order');
-        if (!next) {
-          throw new Error('Order not found');
-        }
+        if (!next) throw new Error('Order not found');
         setOrder(next);
         return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
       });
@@ -270,9 +198,9 @@ export function OrderDetailPage() {
     } finally {
       setProcessing(null);
     }
-  };
+  }
 
-  const handleDispatch = async () => {
+  async function handleDispatch() {
     if (!order || !id) return;
     const trackingId = prompt('Enter tracking ID:');
     if (!trackingId) return;
@@ -281,15 +209,14 @@ export function OrderDetailPage() {
     try {
       if (COMMERCE_DEMO_MODE) {
         const next = dispatchDemoSellerOrder(id, trackingId);
-        if (!next) {
-          throw new Error('Order not found');
-        }
+        if (!next) throw new Error('Order not found');
         setOrder(next);
         return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
       });
@@ -301,284 +228,269 @@ export function OrderDetailPage() {
     } finally {
       setProcessing(null);
     }
-  };
+  }
+
+  const timeline = useMemo(() => (order ? getOrderTimeline(order) : []), [order]);
 
   if (loading) {
     return (
-      <PageLayout>
-        <p style={{ ...TYPOGRAPHY.body, color: DRAMS.textLight }}>Loading order details...</p>
-      </PageLayout>
+      <div className="mx-auto flex max-w-[1280px] px-4 py-8 sm:px-6 lg:px-8">
+        <p className="text-sm text-muted-foreground">Loading order details…</p>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <PageLayout>
-        <PageHeader title="Error" subtitle={error} />
-        <button onClick={() => navigate('/orders')} style={BACK_BUTTON_STYLE}>
-          Back to Orders
-        </button>
-      </PageLayout>
+      <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            Orders
+          </div>
+          <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">Order error</h1>
+          <p className="text-sm text-muted-foreground">{error}</p>
+        </div>
+        <Button variant="secondary" className="w-fit" onClick={() => navigate('/orders')}>
+          Back to orders
+        </Button>
+      </div>
     );
   }
 
   if (!order) {
     return (
-      <PageLayout>
-        <PageHeader title="Not Found" subtitle="Order not found" />
-        <button onClick={() => navigate('/orders')} style={BACK_BUTTON_STYLE}>
-          Back to Orders
-        </button>
-      </PageLayout>
+      <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            Orders
+          </div>
+          <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">Order not found</h1>
+        </div>
+        <Button variant="secondary" className="w-fit" onClick={() => navigate('/orders')}>
+          Back to orders
+        </Button>
+      </div>
     );
   }
 
-  const timeline = getOrderTimeline(order);
-  const statusColor = getStatusColor(order.status);
-
   return (
-    <PageLayout>
-      <button onClick={() => navigate('/orders')} style={BACK_BUTTON_STYLE}>
-        ← Back to Orders
-      </button>
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+      <Button variant="secondary" className="w-fit" onClick={() => navigate('/orders')}>
+        Back to orders
+      </Button>
 
-      <div
-        style={{
-          ...CARD.base,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: SPACING.lg,
-          paddingBottom: SPACING.lg,
-          borderBottom: `1px solid ${DRAMS.grayTrack}`,
-        }}
-      >
-        <div>
-          <h1 style={{ ...TYPOGRAPHY.h2, margin: `0 0 ${SPACING.sm} 0` }}>Order #{order.id}</h1>
-          <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: 0 }}>
-            Placed on{' '}
-            {new Date(order.createdAt).toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </p>
-        </div>
-        <div
-          style={{ ...STATUS_BADGE_STYLE, backgroundColor: `${statusColor}15`, color: statusColor }}
-        >
-          {getStatusLabel(order.status)}
-        </div>
-      </div>
-
-      <div style={ACTIONS_CARD_STYLE}>
-        {canAcceptOrder(order.status) && (
-          <button
-            onClick={handleAccept}
-            disabled={processing === 'accept'}
-            style={{
-              ...BUTTON.primary,
-              opacity: processing === 'accept' ? 0.6 : 1,
-              cursor: processing === 'accept' ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {processing === 'accept' ? 'Processing...' : 'Accept Order'}
-          </button>
-        )}
-        {canRejectOrder(order.status) && (
-          <button
-            onClick={handleReject}
-            disabled={processing === 'reject'}
-            style={{
-              ...BUTTON.danger,
-              opacity: processing === 'reject' ? 0.6 : 1,
-              cursor: processing === 'reject' ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {processing === 'reject' ? 'Processing...' : 'Reject Order'}
-          </button>
-        )}
-        {canDispatchOrder(order.status) && (
-          <button
-            onClick={handleDispatch}
-            disabled={processing === 'dispatch'}
-            style={{
-              ...BUTTON.primary,
-              opacity: processing === 'dispatch' ? 0.6 : 1,
-              cursor: processing === 'dispatch' ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {processing === 'dispatch' ? 'Processing...' : 'Dispatch Order'}
-          </button>
-        )}
-      </div>
-
-      {order.cancellation && (
-        <div
-          style={{ ...SECTION_CARD_STYLE, backgroundColor: '#fef2f2', border: '1px solid #fecaca' }}
-        >
-          <p style={{ ...TYPOGRAPHY.label, margin: `0 0 ${SPACING.sm} 0`, color: '#991b1b' }}>
-            Order Cancelled
-          </p>
-          <p style={{ ...TYPOGRAPHY.bodySmall, color: '#7f1d1d', margin: 0 }}>
-            Cancelled by: {order.cancellation.cancelledBy}
-            {order.cancellation.reason && ` - ${order.cancellation.reason}`}
-          </p>
-        </div>
-      )}
-
-      <div style={SECTION_CARD_STYLE}>
-        <h3 style={SECTION_TITLE_STYLE}>Buyer Information</h3>
-        <p style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.xs} 0` }}>{order.buyer?.name}</p>
-        {order.buyer?.contact?.phone && (
-          <p style={{ ...TYPOGRAPHY.body, margin: `0 0 ${SPACING.xs} 0`, color: DRAMS.textLight }}>
-            Phone: {order.buyer.contact.phone}
-          </p>
-        )}
-        {order.buyer?.contact?.email && (
-          <p style={{ ...TYPOGRAPHY.body, color: DRAMS.textLight, margin: 0 }}>
-            Email: {order.buyer.contact.email}
-          </p>
-        )}
-      </div>
-
-      <div style={{ marginBottom: SPACING.xl }}>
-        <h3 style={SECTION_TITLE_STYLE}>Delivery Address</h3>
-        <div style={{ ...TYPOGRAPHY.body, lineHeight: 1.6, color: DRAMS.textDark }}>
-          <p style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.xs} 0` }}>
-            {order.deliveryAddress?.line1}
-          </p>
-          {order.deliveryAddress?.line2 && (
-            <p style={{ margin: `0 0 ${SPACING.xs} 0` }}>{order.deliveryAddress.line2}</p>
-          )}
-          <p style={{ margin: `0 0 ${SPACING.xs} 0` }}>
-            {order.deliveryAddress?.city}, {order.deliveryAddress?.state}{' '}
-            {order.deliveryAddress?.postalCode}
-          </p>
-          <p style={{ margin: 0 }}>{order.deliveryAddress?.country}</p>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: SPACING.xl }}>
-        <h3 style={SECTION_TITLE_STYLE}>Order Items</h3>
-        <div>
-          {order.items.map((item) => (
-            <div key={item.id} style={ITEM_ROW_STYLE}>
-              <div>
-                <p style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.xs} 0` }}>{item.name}</p>
-                <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: 0 }}>
-                  Quantity: {item.quantity}
-                </p>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ ...TYPOGRAPHY.h4, margin: 0, color: DRAMS.orange }}>
-                  {order.quote?.total?.currency} {item.price.value ?? item.price.amount}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div
-        style={{
-          ...SECTION_CARD_STYLE,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <span style={{ ...TYPOGRAPHY.h3 }}>Order Total</span>
-        <span style={{ ...TYPOGRAPHY.h2, color: DRAMS.orange }}>
-          {order.quote?.total?.currency} {order.quote?.total?.value ?? order.quote?.total?.amount}
-        </span>
-      </div>
-
-      <div style={{ marginBottom: SPACING.xl }}>
-        <h3 style={SECTION_TITLE_STYLE}>Order Timeline</h3>
-        <div style={TIMELINE_STYLE}>
-          <div style={TIMELINE_LINE_STYLE} />
-          {timeline.map((event, index) => (
-            <div
-              key={index}
-              style={{
-                ...TIMELINE_EVENT_STYLE,
-                paddingBottom: index < timeline.length - 1 ? SPACING.xl : 0,
-              }}
-            >
-              <div
-                style={{
-                  ...TIMELINE_DOT_STYLE,
-                  backgroundColor: event.completed ? DRAMS.orange : DRAMS.grayTrack,
-                  boxShadow: `0 0 0 2px ${event.completed ? DRAMS.orange : DRAMS.grayTrack}`,
-                }}
-              />
-              <div>
-                <p style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.xs} 0` }}>{event.label}</p>
-                {event.timestamp && (
-                  <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: 0 }}>
-                    {new Date(event.timestamp).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {orderNotes.length > 0 ? (
-        <div style={SECTION_CARD_STYLE}>
-          <h3 style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.md} 0` }}>Seller Follow-up Notes</h3>
-          <div style={{ display: 'grid', gap: SPACING.md }}>
-            {orderNotes.map((note) => (
-              <div
-                key={note.id}
-                style={{
-                  border: `1px solid ${DRAMS.grayTrack}`,
-                  borderRadius: RADIUS.md,
-                  padding: SPACING.md,
-                  backgroundColor: 'white',
-                }}
-              >
-                <p style={{ ...TYPOGRAPHY.body, margin: 0 }}>{note.note}</p>
-                {note.next_step ? (
-                  <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: `${SPACING.xs} 0 0 0` }}>
-                    Next step: {note.next_step}
-                  </p>
-                ) : null}
-                <p style={{ ...TYPOGRAPHY.bodySmall, color: DRAMS.textLight, margin: `${SPACING.xs} 0 0 0` }}>
-                  {new Date(note.created_at).toLocaleString()}
-                </p>
-              </div>
-            ))}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+            Order detail
           </div>
+          <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
+            Order #{order.id}
+          </h1>
+          <p className="text-sm text-muted-foreground">Placed on {formatDate(order.createdAt)}</p>
         </div>
+        <Badge className={getStatusTone(order.status)}>{STATUS_LABELS[order.status]}</Badge>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        {canAcceptOrder(order.status) ? (
+          <Button disabled={processing === 'accept'} onClick={() => void handleAccept()}>
+            {processing === 'accept' ? 'Processing…' : 'Accept order'}
+          </Button>
+        ) : null}
+        {canRejectOrder(order.status) ? (
+          <Button
+            variant="destructive"
+            disabled={processing === 'reject'}
+            onClick={() => void handleReject()}
+          >
+            {processing === 'reject' ? 'Processing…' : 'Reject order'}
+          </Button>
+        ) : null}
+        {canDispatchOrder(order.status) ? (
+          <Button disabled={processing === 'dispatch'} onClick={() => void handleDispatch()}>
+            {processing === 'dispatch' ? 'Processing…' : 'Dispatch order'}
+          </Button>
+        ) : null}
+      </div>
+
+      {order.cancellation ? (
+        <Card className="border-destructive/20 bg-destructive/5">
+          <CardHeader>
+            <CardTitle className="text-destructive">Cancellation</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
+            <p>{order.cancellation.reason || 'Seller rejected the order.'}</p>
+            <p>Cancelled at {formatDate(order.cancellation.cancelledAt)}</p>
+          </CardContent>
+        </Card>
       ) : null}
 
-      {order.fulfillment?.tracking && (
-        <div style={SECTION_CARD_STYLE}>
-          <h3 style={{ ...TYPOGRAPHY.h4, margin: `0 0 ${SPACING.md} 0` }}>Tracking Information</h3>
-          {order.fulfillment.tracking.id && (
-            <p
-              style={{ ...TYPOGRAPHY.body, margin: `0 0 ${SPACING.xs} 0`, color: DRAMS.textLight }}
-            >
-              Tracking ID: {order.fulfillment.tracking.id}
-            </p>
-          )}
-          {order.fulfillment.tracking.url && (
-            <a
-              href={order.fulfillment.tracking.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: DRAMS.orange, textDecoration: 'none', ...TYPOGRAPHY.label }}
-            >
-              Track Package →
-            </a>
-          )}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Buyer and delivery</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Buyer
+                  </div>
+                  <p className="text-sm font-medium text-foreground">
+                    {order.buyer?.name || 'Unknown buyer'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.buyer?.contact?.phone || order.buyer?.phone || 'No phone'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.buyer?.contact?.email || order.buyer?.email || 'No email'}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Delivery
+                  </div>
+                  <p className="text-sm font-medium text-foreground">
+                    {order.deliveryAddress?.name || 'No recipient'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.deliveryAddress?.line1 || 'No line 1'}
+                  </p>
+                  {order.deliveryAddress?.line2 ? (
+                    <p className="text-sm text-muted-foreground">{order.deliveryAddress.line2}</p>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    {[order.deliveryAddress?.city, order.deliveryAddress?.state, order.deliveryAddress?.postalCode]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.deliveryAddress?.country || 'Country unavailable'}
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Fulfillment
+                  </div>
+                  <p className="text-sm text-foreground">{order.fulfillment?.providerName || 'Pending provider'}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.fulfillment?.tracking?.statusMessage || 'No tracking update yet.'}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Payment
+                  </div>
+                  <p className="text-sm text-foreground">{order.payment?.type || 'Unknown payment type'}</p>
+                  <p className="text-sm text-muted-foreground">{order.payment?.status || 'Unknown status'}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Order items</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {order.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-4 rounded-3xl border border-border/70 bg-card/95 p-4"
+                >
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">Quantity: {item.quantity}</p>
+                  </div>
+                  <div className="text-right text-sm font-medium text-primary">
+                    {order.quote?.total?.currency || item.price.currency} {item.price.value ?? item.price.amount}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {orderNotes.length ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Seller notes</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {orderNotes.map((note) => (
+                  <div key={note.id} className="rounded-3xl border border-border/70 bg-card/95 p-4">
+                    <p className="text-sm text-foreground">{note.note}</p>
+                    {note.next_step ? (
+                      <p className="mt-2 text-sm text-muted-foreground">Next step: {note.next_step}</p>
+                    ) : null}
+                    <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                      {formatDate(note.created_at)}
+                    </p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
-      )}
-    </PageLayout>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Commercial summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Order total</span>
+                <span className="text-lg font-semibold text-primary">
+                  {order.quote?.total?.currency} {order.quote?.total?.value ?? order.quote?.total?.amount}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Last updated</span>
+                <span className="text-foreground">{formatDate(order.updatedAt)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Timeline</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {timeline.map((event, index) => (
+                <div key={`${event.status}-${index}`} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={
+                        event.completed
+                          ? 'mt-1 size-3 rounded-full bg-primary'
+                          : 'mt-1 size-3 rounded-full bg-secondary'
+                      }
+                    />
+                    {index < timeline.length - 1 ? (
+                      <div className="mt-2 h-full w-px bg-border" />
+                    ) : null}
+                  </div>
+                  <div className="pb-4">
+                    <p className="text-sm font-medium text-foreground">{event.label}</p>
+                    {event.timestamp ? (
+                      <p className="text-sm text-muted-foreground">{formatDate(event.timestamp)}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Awaiting update</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
   );
 }

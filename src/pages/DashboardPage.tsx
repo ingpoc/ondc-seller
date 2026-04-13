@@ -9,7 +9,7 @@ import {
   PageLayout,
   Section,
   StatCard,
-} from '@portfolio-ui';
+} from '@/components/seller-ui';
 import { useApi } from '../hooks/useApi';
 import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';

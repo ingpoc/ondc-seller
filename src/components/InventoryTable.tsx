@@ -10,6 +10,7 @@ export interface InventoryTableProps {
   items: BecknItem[];
   onEdit: (item: BecknItem) => void;
   onDelete: (itemId: string) => void;
+  actionsDisabled?: boolean;
 }
 
 function formatCategory(categoryId?: string | null) {
@@ -22,7 +23,12 @@ function formatCategory(categoryId?: string | null) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function InventoryTable({ items, onEdit, onDelete }: InventoryTableProps): JSX.Element {
+export function InventoryTable({
+  items,
+  onEdit,
+  onDelete,
+  actionsDisabled = false,
+}: InventoryTableProps): JSX.Element {
   if (items.length === 0) {
     return (
       <AsyncState
@@ -93,10 +99,22 @@ export function InventoryTable({ items, onEdit, onDelete }: InventoryTableProps)
                 </td>
                 <td className="px-4 py-4 align-top">
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="secondary" size="sm" onClick={() => onEdit(item)}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onEdit(item)}
+                      disabled={actionsDisabled}
+                    >
                       Edit
                     </Button>
-                    <Button type="button" variant="danger" size="sm" onClick={() => onDelete(item.id)}>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      onClick={() => onDelete(item.id)}
+                      disabled={actionsDisabled}
+                    >
                       Delete
                     </Button>
                   </div>

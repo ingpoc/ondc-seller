@@ -16,11 +16,7 @@
 
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { COMMERCE_API_BASE } from './commerceConfig';
-import { normalizeLoopbackUrl } from './loopback';
-
-const IDENTITY_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_URL || 'https://aadharcha.in');
-// Login page URL (frontend) - separate from API gateway
-const IDENTITY_WEB_URL = normalizeLoopbackUrl(import.meta.env.VITE_IDENTITY_WEB_URL || IDENTITY_URL);
+import { IDENTITY_URL, IDENTITY_WEB_URL } from './identityUrls';
 
 // Current authenticated user's wallet address
 let currentWalletAddress: string | null = null;
@@ -104,7 +100,7 @@ apiClient.interceptors.response.use(
       // Don't redirect if already on login page
       if (currentPath !== '/login') {
         const returnUrl = encodeURIComponent(`${window.location.origin}${currentPath}`);
-        window.location.href = `${IDENTITY_URL}/login?return=${returnUrl}`;
+        window.location.href = `${IDENTITY_WEB_URL}/login?return=${returnUrl}`;
       }
     }
     return Promise.reject(error);

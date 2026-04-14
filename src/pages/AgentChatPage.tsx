@@ -19,6 +19,7 @@ import {
   buildSellerAgentSnapshot,
   extractSellerAgentEnvelope,
 } from '@/lib/agentSellerState';
+import { buildAgentControlPlaneUrl } from '@/lib/agentControlPlane';
 import type { SellerAgentAction, SellerAgentSnapshot } from '@/types/agent';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '@/lib/commerceConfig';
 import { getDemoCatalogItems } from '@/lib/mockCatalog';
@@ -30,7 +31,7 @@ interface SellerChatMessage {
   timestamp: number;
 }
 
-const SESSION_STORAGE_KEY = 'portfolio-agent-session-id:/api/agent/seller';
+const SESSION_STORAGE_KEY = `portfolio-agent-session-id:${buildAgentControlPlaneUrl('/api/agent/seller')}`;
 const SELLER_AGENT_UI_STATE_KEY = 'ondc-seller-agent-ui-state';
 
 interface PersistedSellerAgentUiState {
@@ -302,7 +303,7 @@ export function AgentChatPage(): JSX.Element {
     setTrustBlockReason(null);
 
     try {
-      const response = await fetch('/api/agent/seller', {
+      const response = await fetch(buildAgentControlPlaneUrl('/api/agent/seller'), {
         method: 'POST',
         credentials: 'include',
         headers: {

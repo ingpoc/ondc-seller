@@ -236,8 +236,12 @@ export function CatalogPage() {
                 {featuredItems.map((item) => (
                   <Card
                     key={item.id}
-                    className="group cursor-pointer overflow-hidden p-0 transition-all duration-150 hover:-translate-y-1 hover:shadow-[var(--ui-shadow-md)]"
-                    onClick={() => handleEdit(item)}
+                    className={`group overflow-hidden p-0 transition-all duration-150 ${
+                      trustBlocksCatalog
+                        ? 'cursor-not-allowed opacity-75'
+                        : 'cursor-pointer hover:-translate-y-1 hover:shadow-[var(--ui-shadow-md)]'
+                    }`}
+                    onClick={trustBlocksCatalog ? undefined : () => handleEdit(item)}
                   >
                     <div className="relative h-48 overflow-hidden bg-secondary/70">
                       <div className="absolute left-4 top-4 z-10">
@@ -275,6 +279,7 @@ export function CatalogPage() {
                           type="button"
                           variant="secondary"
                           size="sm"
+                          disabled={trustBlocksCatalog}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleEdit(item);
@@ -302,6 +307,7 @@ export function CatalogPage() {
               onDelete={(id) => {
                 void handleDelete(id);
               }}
+              actionsDisabled={trustBlocksCatalog}
             />
           </Section>
         </>

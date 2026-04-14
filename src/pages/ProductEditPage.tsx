@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { useApi } from '../hooks/useApi';
+import { useTrustState } from '../hooks/useTrustState';
 import { ProductForm } from '../components';
 import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
@@ -9,17 +11,22 @@ import { upsertDemoCatalogItem } from '../lib/mockCatalog';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import {
   Alert,
+  Button,
   Card,
   PageLayout,
   PageHeader,
 } from '@/components/seller-ui';
+import { TrustNotice } from '../components/TrustStatus';
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
+  const { publicKey } = useWallet();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isNew = !id;
   const shouldUseAgentDraft = searchParams.get('draft') === 'agent';
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
 
   const { data: existingProduct, execute } = useApi<BecknItem>(
     isNew ? '/api/catalog' : `/api/catalog/products/${id}`
@@ -97,6 +104,43 @@ export function ProductEditPage() {
   const handleCancel = useCallback(() => {
     navigate('/catalog');
   }, [navigate]);
+
+  if (trust.loading) {
+    return (
+      <PageLayout>
+        <PageHeader
+          title={isNew ? 'Add New Product' : 'Edit Product'}
+          subtitle="Checking AadhaarChain trust before opening seller write actions."
+        />
+        <TrustNotice state={trust.state} loading={trust.loading} error={trust.error} reason={trust.reason} />
+      </PageLayout>
+    );
+  }
+
+  if (trustBlocksCatalog || trust.error) {
+    return (
+      <PageLayout>
+        <PageHeader
+          title={isNew ? 'Add New Product' : 'Edit Product'}
+          subtitle="Seller catalog writes stay blocked until AadhaarChain trust is verified."
+        />
+        <div className="space-y-6">
+          <TrustNotice
+            state={trust.state}
+            loading={trust.loading}
+            error={trust.error}
+            reason={trust.reason}
+            actionLabel="Resolve trust in AadhaarChain"
+          />
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="secondary" onClick={handleCancel}>
+              Back to catalog
+            </Button>
+          </div>
+        </div>
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout>

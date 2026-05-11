@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWallet } from '@solana/wallet-adapter-react';
 import {
@@ -11,6 +11,7 @@ import {
   StatCard,
 } from '@/components/seller-ui';
 import { useApi } from '../hooks/useApi';
+import { createSignedIdentityProof } from '../lib/trust';
 import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
 
@@ -26,9 +27,11 @@ interface SellerCatalogItem {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { publicKey } = useWallet();
+  const { publicKey, signMessage } = useWallet();
   const trust = useTrustState(publicKey?.toBase58() ?? null);
   const { data, loading, error, execute } = useApi('/api/catalog');
+  const [proofState, setProofState] = useState<'idle' | 'signing' | 'verified' | 'error'>('idle');
+  const [proofMessage, setProofMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void execute();
@@ -46,6 +49,31 @@ export function DashboardPage() {
     : trust.state === 'verified'
       ? 'Verified'
       : 'Needs action';
+
+  async function handleProveSellerIdentity(): Promise<void> {
+    const walletAddress = publicKey?.toBase58();
+    if (!walletAddress || !signMessage) {
+      setProofState('error');
+      setProofMessage('Wallet message signing is not available for this account.');
+      return;
+    }
+
+    setProofState('signing');
+    setProofMessage(null);
+    try {
+      const result = await createSignedIdentityProof({
+        walletAddress,
+        audience: 'seller',
+        purpose: 'seller_catalog_identity_proof',
+        signMessage,
+      });
+      setProofState(result.valid ? 'verified' : 'error');
+      setProofMessage(result.reason);
+    } catch (err) {
+      setProofState('error');
+      setProofMessage(err instanceof Error ? err.message : 'Seller identity proof failed.');
+    }
+  }
 
   return (
     <PageLayout>
@@ -105,6 +133,35 @@ export function DashboardPage() {
             hint="Order intake stays quiet until live buyer traffic arrives"
           />
         </div>
+
+        <Card className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-2">
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
+                Seller proof
+              </div>
+              <h2 className="text-xl font-bold text-[var(--ui-text)]">
+                {proofState === 'verified' ? 'Identity signed' : 'Sign seller proof'}
+              </h2>
+              <p className="max-w-3xl text-sm text-[var(--ui-text-secondary)]">
+                Sign a short-lived AadhaarChain proof before high-trust catalog and order actions.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={trust.loading || trust.state !== 'verified' || proofState === 'signing'}
+              onClick={() => void handleProveSellerIdentity()}
+            >
+              {proofState === 'signing' ? 'Awaiting signature' : 'Sign seller proof'}
+            </Button>
+          </div>
+          {proofMessage ? (
+            <div className="rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-[var(--ui-bg-subtle)] px-4 py-3 text-sm text-[var(--ui-text-secondary)]">
+              {proofMessage}
+            </div>
+          ) : null}
+        </Card>
       </Section>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">

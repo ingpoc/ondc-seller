@@ -1,6 +1,9 @@
 import {
   createTrustClient,
+  encodeBase58,
+  type IdentityProofAudience,
   type PortfolioTrustState,
+  type SignedIdentityProofResult,
   type TrustSnapshot,
   type TrustSurface,
   type TrustVerificationSummary,
@@ -8,7 +11,9 @@ import {
 import { TRUST_API_URL } from './identityUrls';
 
 export type {
+  IdentityProofAudience,
   PortfolioTrustState,
+  SignedIdentityProofResult,
   TrustSnapshot,
   TrustSurface,
   TrustVerificationSummary,
@@ -18,4 +23,26 @@ const trustClient = createTrustClient({ trustApiUrl: TRUST_API_URL });
 
 export async function fetchTrustSnapshot(walletAddress: string): Promise<TrustSnapshot> {
   return trustClient.fetchTrustSnapshot(walletAddress);
+}
+
+export async function createSignedIdentityProof({
+  walletAddress,
+  audience,
+  purpose,
+  signMessage,
+}: {
+  walletAddress: string;
+  audience: IdentityProofAudience;
+  purpose: string;
+  signMessage: (message: Uint8Array) => Promise<Uint8Array>;
+}): Promise<SignedIdentityProofResult> {
+  const token = await trustClient.issueIdentityProofToken(walletAddress, audience, purpose);
+  const signature = await signMessage(new TextEncoder().encode(token.message));
+  return trustClient.verifySignedIdentityProof({
+    tokenId: token.token_id,
+    walletAddress,
+    audience,
+    message: token.message,
+    signature: encodeBase58(signature),
+  });
 }

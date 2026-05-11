@@ -82,6 +82,9 @@ reason. Commerce API calls are built from a typed backend policy envelope with
 required-trust, observed-trust, wallet, and audit-subject headers. Production
 must treat these client headers as context only and verify session, wallet
 identity, AadhaarChain trust state, policy, and audit writes independently.
+The deterministic backend-side enforcement contract lives in
+`src/lib/sellerBackendEnforcement.ts` so a commerce API or serverless adapter can
+reuse the same fail-closed checks before applying protected seller mutations.
 
 ## Development
 

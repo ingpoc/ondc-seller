@@ -11,12 +11,20 @@ import {
   PageHeader,
   PageLayout,
 } from '@/components/seller-ui';
+import { TrustNotice } from '@/components/TrustStatus';
+import { useSubject, useTrustState } from '@/hooks';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
   listDemoSellerOrders,
   rejectDemoSellerOrder,
 } from '../lib/localSellerOrders';
+import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
+import {
+  buildSellerActionHeaders,
+  buildSellerBackendActionPolicy,
+  canExecuteSellerAction,
+} from '../lib/sellerActionPolicy';
 
 const isPendingStatus = (status: UCPOrderStatus): boolean => status === 'created';
 const isAcceptedStatus = (status: UCPOrderStatus): boolean =>
@@ -83,12 +91,14 @@ export function OrderCard({
   onReject,
   onViewDetails,
   processing,
+  actionsDisabled = false,
 }: {
   order: UCPOrder;
   onAccept?: (orderId: string) => void;
   onReject?: (orderId: string) => void;
   onViewDetails?: (orderId: string) => void;
   processing?: string | null;
+  actionsDisabled?: boolean;
 }) {
   const canAccept = isPendingStatus(order.status);
   const canReject = isPendingStatus(order.status);
@@ -154,7 +164,7 @@ export function OrderCard({
               type="button"
               size="sm"
               onClick={() => onAccept?.(order.id)}
-              disabled={isProcessing}
+              disabled={isProcessing || actionsDisabled}
             >
               Accept
             </Button>
@@ -165,7 +175,7 @@ export function OrderCard({
               size="sm"
               variant="danger"
               onClick={() => onReject?.(order.id)}
-              disabled={isProcessing}
+              disabled={isProcessing || actionsDisabled}
             >
               Reject
             </Button>
@@ -186,11 +196,14 @@ export function OrderCard({
 
 export function OrdersPage() {
   const navigate = useNavigate();
+  const { subjectId, walletAddress } = useSubject();
+  const trust = useTrustState(walletAddress);
   const [orders, setOrders] = useState<UCPOrder[]>([]);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const orderActionsDisabled = trust.loading || !canExecuteSellerAction('order_accept', trust.state);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -222,6 +235,21 @@ export function OrdersPage() {
 
   const handleAccept = useCallback(
     async (orderId: string) => {
+      if (!canExecuteSellerAction('order_accept', trust.state)) {
+        const reason = 'Verified seller trust is required before accepting orders.';
+        recordSellerActionAuditEvent({
+          action: 'order_accept',
+          targetId: orderId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'blocked',
+          reason,
+        });
+        setError(reason);
+        return;
+      }
+
       setProcessing(orderId);
       try {
         if (COMMERCE_DEMO_MODE) {
@@ -229,6 +257,15 @@ export function OrdersPage() {
           if (!next) {
             throw new Error('Order not found');
           }
+          recordSellerActionAuditEvent({
+            action: 'order_accept',
+            targetId: orderId,
+            walletAddress,
+            subjectId,
+            trustState: trust.state,
+            outcome: 'applied',
+            reason: 'Accepted seller order from the orders list in demo mode.',
+          });
           setOrders(listDemoSellerOrders());
           return;
         }
@@ -236,10 +273,27 @@ export function OrdersPage() {
         const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
           method: 'POST',
           credentials: 'include',
+          headers: buildSellerActionHeaders(
+            buildSellerBackendActionPolicy('order_accept', {
+              trustState: trust.state,
+              walletAddress,
+              subjectId,
+              auditSubjectId: orderId,
+            }),
+          ),
         });
         if (!response.ok) {
           throw new Error('Failed to accept order');
         }
+        recordSellerActionAuditEvent({
+          action: 'order_accept',
+          targetId: orderId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Accepted seller order through commerce API from the orders list.',
+        });
         await loadOrders();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to accept order');
@@ -247,12 +301,26 @@ export function OrdersPage() {
         setProcessing(null);
       }
     },
-    [loadOrders],
+    [loadOrders, subjectId, trust.state, walletAddress],
   );
 
   const handleReject = useCallback(
     async (orderId: string) => {
       if (!window.confirm('Are you sure you want to reject this order?')) {
+        return;
+      }
+      if (!canExecuteSellerAction('order_reject', trust.state)) {
+        const reason = 'Verified seller trust is required before rejecting orders.';
+        recordSellerActionAuditEvent({
+          action: 'order_reject',
+          targetId: orderId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'blocked',
+          reason,
+        });
+        setError(reason);
         return;
       }
 
@@ -263,6 +331,15 @@ export function OrdersPage() {
           if (!next) {
             throw new Error('Order not found');
           }
+          recordSellerActionAuditEvent({
+            action: 'order_reject',
+            targetId: orderId,
+            walletAddress,
+            subjectId,
+            trustState: trust.state,
+            outcome: 'applied',
+            reason: 'Rejected seller order from the orders list in demo mode.',
+          });
           setOrders(listDemoSellerOrders());
           return;
         }
@@ -270,12 +347,29 @@ export function OrdersPage() {
         const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
+          headers: buildSellerActionHeaders(
+            buildSellerBackendActionPolicy('order_reject', {
+              trustState: trust.state,
+              walletAddress,
+              subjectId,
+              auditSubjectId: orderId,
+              auditReferenceId: 'seller-rejection',
+            }),
+          ),
           body: JSON.stringify({ reason: 'Seller rejected' }),
         });
         if (!response.ok) {
           throw new Error('Failed to reject order');
         }
+        recordSellerActionAuditEvent({
+          action: 'order_reject',
+          targetId: orderId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Rejected seller order through commerce API from the orders list.',
+        });
         await loadOrders();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to reject order');
@@ -283,7 +377,7 @@ export function OrdersPage() {
         setProcessing(null);
       }
     },
-    [loadOrders],
+    [loadOrders, subjectId, trust.state, walletAddress],
   );
 
   const handleViewDetails = useCallback(
@@ -300,6 +394,13 @@ export function OrdersPage() {
       <PageHeader
         title="Incoming Orders"
         subtitle="Manage and track buyer demand without leaving the trust-aware seller shell."
+      />
+      <TrustNotice
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        actionLabel="Resolve seller trust"
       />
 
       {loading ? (
@@ -365,6 +466,7 @@ export function OrdersPage() {
                   onReject={handleReject}
                   onViewDetails={handleViewDetails}
                   processing={processing}
+                  actionsDisabled={orderActionsDisabled}
                 />
               ))}
             </div>

@@ -4,6 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import React from 'react';
+import { render, screen } from '@testing-library/react';
 import type { UCPOrderStatus } from '@ondc-sdk/shared';
 
 // Import the component to ensure TypeScript compilation
@@ -176,6 +178,39 @@ describe('Seller OrdersPage (SDK-SELLER-ORDERS-002)', () => {
     it('should always show view details button', () => {
       const alwaysShow = true;
       expect(alwaysShow).toBe(true);
+    });
+
+    it('disables order write buttons when trust-gated actions are disabled', () => {
+      render(
+        React.createElement(OrderCard, {
+          order: {
+            id: 'seller-demo-1001',
+            status: 'created',
+            createdAt: '2026-05-12T00:00:00Z',
+            updatedAt: '2026-05-12T00:00:00Z',
+            total: 100,
+            items: [
+              {
+                id: 'item-1',
+                name: 'Demo item',
+                quantity: 1,
+                price: { currency: 'INR', value: '100.00' },
+              },
+            ],
+            quote: {
+              price: { currency: 'INR', value: '100.00' },
+              total: { currency: 'INR', value: '100.00' },
+              subtotal: { currency: 'INR', value: '100.00' },
+              breakup: [],
+            },
+          },
+          actionsDisabled: true,
+        }),
+      );
+
+      expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'View Details' })).not.toBeDisabled();
     });
   });
 

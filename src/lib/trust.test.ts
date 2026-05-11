@@ -51,13 +51,13 @@ function jsonResponse(data: unknown) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('fetchTrustSnapshot', () => {
   it('returns no_identity without calling the trust endpoint when identity is missing', async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ data: null }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ data: null }));
+    vi.stubGlobal('fetch', fetchMock);
 
     const snapshot = await fetchTrustSnapshot(WALLET_ADDRESS);
 
@@ -72,9 +72,13 @@ describe('fetchTrustSnapshot', () => {
 
   it.each(TRUST_STATES)('maps AadhaarChain fixture state %s', async (state) => {
     const trust = trustSurface(state);
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ data: { owner: WALLET_ADDRESS } }))
-      .mockResolvedValueOnce(jsonResponse({ data: trust }));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ data: { owner: WALLET_ADDRESS } }))
+        .mockResolvedValueOnce(jsonResponse({ data: trust })),
+    );
 
     const snapshot = await fetchTrustSnapshot(WALLET_ADDRESS);
 
@@ -85,11 +89,14 @@ describe('fetchTrustSnapshot', () => {
   });
 
   it('surfaces trust-service failures for callers to fail closed', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-    } as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      } as Response),
+    );
 
     await expect(fetchTrustSnapshot(WALLET_ADDRESS)).rejects.toThrow('Trust API request failed: 503');
   });

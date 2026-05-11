@@ -1,4 +1,5 @@
 import type { PortfolioTrustState } from './trust';
+import { assertSellerActionAllowed, canExecuteSellerAction } from './sellerActionPolicy';
 
 const LOCAL_CONFIG_STORAGE_KEY = 'ondc-seller-local-config';
 const VERIFIED_CONFIG_MESSAGE =
@@ -41,11 +42,13 @@ export function saveLocalSellerConfig(config: SellerClientConfig) {
 }
 
 export function canMutateSellerConfig(trustState: PortfolioTrustState): boolean {
-  return trustState === 'verified';
+  return canExecuteSellerAction('seller_config_save', trustState);
 }
 
 export function assertCanMutateSellerConfig(trustState: PortfolioTrustState): void {
-  if (!canMutateSellerConfig(trustState)) {
+  try {
+    assertSellerActionAllowed('seller_config_save', { trustState });
+  } catch {
     throw new Error(VERIFIED_CONFIG_MESSAGE);
   }
 }

@@ -20,7 +20,11 @@ import {
   extractSellerAgentEnvelope,
 } from '@/lib/agentSellerState';
 import { buildAgentControlPlaneUrl } from '@/lib/agentControlPlane';
-import type { SellerAgentAction, SellerAgentSnapshot } from '@/types/agent';
+import type {
+  SellerAgentAction,
+  SellerAgentResponseEnvelope,
+  SellerAgentSnapshot,
+} from '@/types/agent';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '@/lib/commerceConfig';
 import { getDemoCatalogItems } from '@/lib/mockCatalog';
 import { listDemoSellerOrders } from '@/lib/localSellerOrders';
@@ -242,6 +246,7 @@ export function AgentChatPage(): JSX.Element {
   const [latestSummary, setLatestSummary] = useState(() => readPersistedUiState().latestSummary);
   const [latestActions, setLatestActions] = useState<SellerAgentAction[]>(() => readPersistedUiState().latestActions);
   const [trustBlockReason, setTrustBlockReason] = useState<string | null>(() => readPersistedUiState().trustBlockReason);
+  const [pendingEnvelope, setPendingEnvelope] = useState<SellerAgentResponseEnvelope | null>(null);
   const [catalogItems, setCatalogItems] = useState<BecknItem[] | null>(null);
   const [orderItems, setOrderItems] = useState<UCPOrder[] | null>(null);
   const sessionIdRef = useRef(getSessionId());
@@ -249,6 +254,7 @@ export function AgentChatPage(): JSX.Element {
   const latestSummaryRef = useRef(latestSummary);
   const latestActionsRef = useRef(latestActions);
   const trustBlockReasonRef = useRef(trustBlockReason);
+  const pendingEnvelopeRef = useRef<SellerAgentResponseEnvelope | null>(null);
 
   const usageLabel =
     runtime.usage.requests_limit > 0
@@ -301,6 +307,8 @@ export function AgentChatPage(): JSX.Element {
     setIsLoading(true);
     setStreaming(false);
     setTrustBlockReason(null);
+    setPendingEnvelope(null);
+    pendingEnvelopeRef.current = null;
 
     try {
       const response = await fetch(buildAgentControlPlaneUrl('/api/agent/seller'), {
@@ -351,7 +359,21 @@ export function AgentChatPage(): JSX.Element {
             return;
           }
 
-          const result = applySellerAgentEnvelope(envelope, trust.state);
+          const result = applySellerAgentEnvelope(envelope, trust.state, {
+            approved: false,
+            actor: {
+              walletAddress,
+              subjectId,
+              sessionId: sessionIdRef.current,
+            },
+          });
+          if (result.pendingApproval) {
+            setPendingEnvelope(envelope);
+            pendingEnvelopeRef.current = envelope;
+          } else {
+            setPendingEnvelope(null);
+            pendingEnvelopeRef.current = null;
+          }
           commitUiState({
             messages: [
               ...messagesRef.current,
@@ -404,6 +426,44 @@ export function AgentChatPage(): JSX.Element {
     }
   };
 
+  const approvePendingWrites = () => {
+    const envelope = pendingEnvelopeRef.current;
+    if (!envelope || !subjectId) {
+      return;
+    }
+
+    const result = applySellerAgentEnvelope(envelope, trust.state, {
+      approved: true,
+      actor: {
+        walletAddress,
+        subjectId,
+        sessionId: sessionIdRef.current,
+      },
+    });
+
+    setPendingEnvelope(null);
+    pendingEnvelopeRef.current = null;
+    commitUiState({
+      messages: [
+        ...messagesRef.current,
+        {
+          role: 'system',
+          content: result.pendingApproval
+            ? 'Seller writes still require approval before execution.'
+            : 'Approved seller agent writes were applied and audited.',
+          timestamp: Date.now(),
+        },
+      ] as SellerChatMessage[],
+      latestSummary: result.summary,
+      latestActions: result.actions,
+      trustBlockReason: result.trustBlockReason,
+    });
+    setRefreshNonce((value) => value + 1);
+    if (result.navigateTo) {
+      navigate(result.navigateTo);
+    }
+  };
+
   useEffect(() => {
     if (!isLoading) {
       return;
@@ -418,6 +478,7 @@ export function AgentChatPage(): JSX.Element {
     latestSummaryRef.current = latestSummary;
     latestActionsRef.current = latestActions;
     trustBlockReasonRef.current = trustBlockReason;
+    pendingEnvelopeRef.current = pendingEnvelope;
     const existing = readPersistedUiState();
     persistUiState({
       messages: messages.length >= existing.messages.length ? messages : existing.messages,
@@ -425,7 +486,7 @@ export function AgentChatPage(): JSX.Element {
       latestActions: latestActions.length > 0 ? latestActions : existing.latestActions,
       trustBlockReason: trustBlockReason ?? existing.trustBlockReason,
     });
-  }, [latestActions, latestSummary, messages, trustBlockReason]);
+  }, [latestActions, latestSummary, messages, pendingEnvelope, trustBlockReason]);
 
   useEffect(() => {
     let cancelled = false;
@@ -608,6 +669,24 @@ export function AgentChatPage(): JSX.Element {
                   title="Trust still blocks execution"
                   description={trustBlockReason}
                 />
+              ) : null}
+
+              {pendingEnvelope ? (
+                <Card className="space-y-3 border-primary/20 bg-primary/8">
+                  <div className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--ui-text-muted)]">
+                    Approval required
+                  </div>
+                  <div className="text-sm text-[var(--ui-text-secondary)]">
+                    Review the proposed seller writes below before applying them to catalog or order history.
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={approvePendingWrites}
+                    disabled={trust.state !== 'verified'}
+                  >
+                    Approve and apply writes
+                  </Button>
+                </Card>
               ) : null}
 
               <Card className="space-y-3">

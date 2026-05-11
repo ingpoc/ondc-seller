@@ -51,7 +51,35 @@ Create a `.env` file in the project root:
 ```env
 # API Base URL (default: http://localhost:3001)
 VITE_API_BASE_URL=http://localhost:3001
+
+# Local browser-only commerce fallback for portfolio acceptance testing
+VITE_COMMERCE_DEMO_MODE=true
 ```
+
+## Trust And ONDC Boundaries
+
+`ondc-seller` is a downstream trust consumer. It does not verify identity documents
+or operate an ONDC BPP/provider directly. AadhaarChain owns identity and trust
+state; the configured commerce API behind `VITE_API_BASE_URL` owns production
+catalog, order, fulfillment, and seller-configuration writes.
+
+The frontend enforces the same seller action policy before local demo writes and
+before calling commerce endpoints:
+
+| Action | Required trust | Runtime boundary |
+|--------|----------------|------------------|
+| View dashboard, catalog, orders, config, support | Auth/session or wallet subject | Frontend read path |
+| Draft catalog listing for review | Wallet subject | Local draft state |
+| Create or edit catalog item, publish listing, change price, delete item | Verified AadhaarChain trust | Commerce API or local demo catalog |
+| Accept, reject, or dispatch orders | Verified AadhaarChain trust | Commerce API or local demo orders |
+| Save seller configuration or generate keys | Verified AadhaarChain trust | Commerce API or local demo config |
+| Agent catalog patches and order follow-up notes | Verified AadhaarChain trust plus explicit UI approval | Local seller action executor |
+
+Every sensitive local/demo write records an audit event with action, target,
+wallet, subject, session when available, trust state, timestamp, outcome, and
+reason. Commerce API calls include trust/session headers so the backend can
+repeat the same policy server-side; production must treat these client headers as
+context only and verify session, wallet identity, and trust state independently.
 
 ## Development
 

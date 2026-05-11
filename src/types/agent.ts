@@ -179,10 +179,22 @@ export interface SellerOrderNote {
 
 export interface SellerActionAuditEvent {
   id: string;
-  action: 'catalog_patch' | 'order_followup_note';
+  action:
+    | 'catalog_patch'
+    | 'catalog_save'
+    | 'catalog_delete'
+    | 'order_accept'
+    | 'order_reject'
+    | 'order_dispatch'
+    | 'seller_config_save'
+    | 'seller_config_generate_keys'
+    | 'order_followup_note';
   target_id: string;
+  wallet_address?: string | null;
+  subject_id?: string | null;
+  session_id?: string | null;
   trust_state: PortfolioTrustState;
-  outcome: 'applied' | 'blocked';
+  outcome: 'applied' | 'blocked' | 'pending_approval';
   reason: string;
   created_at: string;
 }
@@ -197,4 +209,5 @@ export interface SellerAgentPatchResult {
   auditEvents: SellerActionAuditEvent[];
   navigateTo: string | null;
   trustBlockReason: string | null;
+  pendingApproval: boolean;
 }

@@ -239,7 +239,7 @@ describe('agentSellerState', () => {
       'identity_present_unverified',
     );
 
-    expect(result.trustBlockReason).toContain('requires verified seller trust');
+    expect(result.trustBlockReason).toContain('Verified seller trust');
     expect(getDemoCatalogItems()[0]?.descriptor?.short_desc).toBe(beforeDescription);
   });
 
@@ -261,6 +261,7 @@ describe('agentSellerState', () => {
         ],
       },
       'verified',
+      { approved: true },
     );
 
     expect(result.trustBlockReason).toBeNull();
@@ -271,6 +272,50 @@ describe('agentSellerState', () => {
     );
     expect(updated?.price?.currency).toBe('INR');
     expect(updated?.price?.value).toBe('299.00');
+  });
+
+  it('stages verified agent writes until the seller explicitly approves them', () => {
+    const before = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+
+    const result = applySellerAgentEnvelope(
+      {
+        summary: 'Listing update needs approval.',
+        actions: [
+          {
+            type: 'catalog_patch',
+            target_item_id: 'demo-cold-pressed-oil',
+            reason: 'Tighten the live listing copy',
+            patch: {
+              description: 'Pending approval description.',
+              price: '301.00',
+            },
+          },
+        ],
+      },
+      'verified',
+      {
+        approved: false,
+        actor: {
+          walletAddress: 'seller-wallet-fixture',
+          subjectId: 'seller-subject-fixture',
+          sessionId: 'seller-session-fixture',
+        },
+      },
+    );
+
+    const after = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    expect(result.pendingApproval).toBe(true);
+    expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
+    expect(after?.price?.value).toBe(before?.price?.value);
+    expect(result.auditEvents[0]).toMatchObject({
+      action: 'catalog_patch',
+      target_id: 'demo-cold-pressed-oil',
+      wallet_address: 'seller-wallet-fixture',
+      subject_id: 'seller-subject-fixture',
+      session_id: 'seller-session-fixture',
+      trust_state: 'verified',
+      outcome: 'pending_approval',
+    });
   });
 
   it('applies verified field/value catalog patches without blanking preserved fields', () => {
@@ -295,7 +340,7 @@ describe('agentSellerState', () => {
     );
 
     expect(envelope).not.toBeNull();
-    const result = applySellerAgentEnvelope(envelope!, 'verified');
+    const result = applySellerAgentEnvelope(envelope!, 'verified', { approved: true });
     expect(result.trustBlockReason).toBeNull();
 
     const updated = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
@@ -328,6 +373,7 @@ describe('agentSellerState', () => {
         ],
       },
       trustState,
+      { approved: trustState === 'verified' },
     );
 
     const after = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
@@ -345,7 +391,7 @@ describe('agentSellerState', () => {
       return;
     }
 
-    expect(result.trustBlockReason).toContain('verified');
+    expect(result.trustBlockReason).toContain('Verified seller trust');
     expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
     expect(after?.price?.value).toBe(before?.price?.value);
     expect(result.auditEvents[0]).toMatchObject({
@@ -370,6 +416,7 @@ describe('agentSellerState', () => {
         ],
       },
       trustState,
+      { approved: trustState === 'verified' },
     );
 
     if (trustState === 'verified') {
@@ -385,7 +432,7 @@ describe('agentSellerState', () => {
       return;
     }
 
-    expect(result.trustBlockReason).toContain('verified seller trust');
+    expect(result.trustBlockReason).toContain('Verified seller trust');
     expect(listSellerOrderNotesForOrder('seller-demo-1001')).toEqual([]);
     expect(result.auditEvents[0]).toMatchObject({
       action: 'order_followup_note',

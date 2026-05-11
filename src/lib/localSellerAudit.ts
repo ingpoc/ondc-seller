@@ -44,12 +44,18 @@ export function clearSellerActionAuditEvents() {
 export function recordSellerActionAuditEvent({
   action,
   targetId,
+  walletAddress,
+  subjectId,
+  sessionId,
   trustState,
   outcome,
   reason,
 }: {
   action: SellerActionAuditEvent['action'];
   targetId: string;
+  walletAddress?: string | null;
+  subjectId?: string | null;
+  sessionId?: string | null;
   trustState: PortfolioTrustState;
   outcome: SellerActionAuditEvent['outcome'];
   reason: string;
@@ -58,6 +64,9 @@ export function recordSellerActionAuditEvent({
     id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     action,
     target_id: targetId,
+    wallet_address: walletAddress ?? null,
+    subject_id: subjectId ?? null,
+    session_id: sessionId ?? null,
     trust_state: trustState,
     outcome,
     reason,

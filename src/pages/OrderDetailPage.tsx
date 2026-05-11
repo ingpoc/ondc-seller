@@ -7,8 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { TrustNotice } from '@/components/TrustStatus';
-import { useTrustState } from '@/hooks';
+import { useSubject, useTrustState } from '@/hooks';
 import type { PortfolioTrustState } from '@/lib/trust';
+import { recordSellerActionAuditEvent } from '@/lib/localSellerAudit';
+import {
+  buildSellerActionHeaders,
+  canExecuteSellerAction,
+  type SellerSensitiveAction,
+} from '@/lib/sellerActionPolicy';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
@@ -29,7 +35,12 @@ export function canMutateSellerOrder(
   mutation: SellerOrderMutation,
   trustState: PortfolioTrustState,
 ): boolean {
-  if (trustState !== 'verified') return false;
+  const actionByMutation: Record<SellerOrderMutation, SellerSensitiveAction> = {
+    accept: 'order_accept',
+    reject: 'order_reject',
+    dispatch: 'order_dispatch',
+  };
+  if (!canExecuteSellerAction(actionByMutation[mutation], trustState)) return false;
   if (mutation === 'accept') return canAcceptOrder(status);
   if (mutation === 'reject') return canRejectOrder(status);
   return canDispatchOrder(status);
@@ -123,6 +134,7 @@ export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { publicKey } = useWallet();
+  const { subjectId, walletAddress } = useSubject();
   const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [order, setOrder] = useState<UCPOrder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -167,6 +179,15 @@ export function OrderDetailPage() {
   async function handleAccept() {
     if (!order || !id) return;
     if (!canMutateSellerOrder(order.status, 'accept', trust.state)) {
+      recordSellerActionAuditEvent({
+        action: 'order_accept',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'blocked',
+        reason: 'Verified seller trust is required before accepting orders.',
+      });
       setError('Verified seller trust is required before accepting orders.');
       return;
     }
@@ -175,6 +196,15 @@ export function OrderDetailPage() {
       if (COMMERCE_DEMO_MODE) {
         const next = acceptDemoSellerOrder(id);
         if (!next) throw new Error('Order not found');
+        recordSellerActionAuditEvent({
+          action: 'order_accept',
+          targetId: id,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Accepted seller order in demo mode.',
+        });
         setOrder(next);
         return;
       }
@@ -182,9 +212,23 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
         method: 'POST',
         credentials: 'include',
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
       });
       if (!response.ok) throw new Error('Failed to accept order');
       const data = await response.json();
+      recordSellerActionAuditEvent({
+        action: 'order_accept',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Accepted seller order through commerce API.',
+      });
       setOrder(data.order);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept order');
@@ -196,6 +240,15 @@ export function OrderDetailPage() {
   async function handleReject() {
     if (!order || !id) return;
     if (!canMutateSellerOrder(order.status, 'reject', trust.state)) {
+      recordSellerActionAuditEvent({
+        action: 'order_reject',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'blocked',
+        reason: 'Verified seller trust is required before rejecting orders.',
+      });
       setError('Verified seller trust is required before rejecting orders.');
       return;
     }
@@ -206,6 +259,15 @@ export function OrderDetailPage() {
       if (COMMERCE_DEMO_MODE) {
         const next = rejectDemoSellerOrder(id, 'Seller rejected the order');
         if (!next) throw new Error('Order not found');
+        recordSellerActionAuditEvent({
+          action: 'order_reject',
+          targetId: id,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Rejected seller order in demo mode.',
+        });
         setOrder(next);
         return;
       }
@@ -213,11 +275,24 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
       });
       if (!response.ok) throw new Error('Failed to reject order');
       const data = await response.json();
+      recordSellerActionAuditEvent({
+        action: 'order_reject',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Rejected seller order through commerce API.',
+      });
       setOrder(data.order);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject order');
@@ -229,6 +304,15 @@ export function OrderDetailPage() {
   async function handleDispatch() {
     if (!order || !id) return;
     if (!canMutateSellerOrder(order.status, 'dispatch', trust.state)) {
+      recordSellerActionAuditEvent({
+        action: 'order_dispatch',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'blocked',
+        reason: 'Verified seller trust is required before dispatching orders.',
+      });
       setError('Verified seller trust is required before dispatching orders.');
       return;
     }
@@ -240,6 +324,15 @@ export function OrderDetailPage() {
       if (COMMERCE_DEMO_MODE) {
         const next = dispatchDemoSellerOrder(id, trackingId);
         if (!next) throw new Error('Order not found');
+        recordSellerActionAuditEvent({
+          action: 'order_dispatch',
+          targetId: id,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Dispatched seller order in demo mode.',
+        });
         setOrder(next);
         return;
       }
@@ -247,11 +340,24 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
       });
       if (!response.ok) throw new Error('Failed to dispatch order');
       const data = await response.json();
+      recordSellerActionAuditEvent({
+        action: 'order_dispatch',
+        targetId: id,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Dispatched seller order through commerce API.',
+      });
       setOrder(data.order);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch order');

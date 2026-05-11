@@ -3,12 +3,18 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useApi } from '../hooks/useApi';
 import { useTrustState } from '../hooks/useTrustState';
+import { useSubject } from '../hooks/useSubject';
 import { ProductForm } from '../components';
 import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { upsertDemoCatalogItem } from '../lib/mockCatalog';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
+import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
+import {
+  assertSellerActionAllowed,
+  buildSellerActionHeaders,
+} from '../lib/sellerActionPolicy';
 import {
   Alert,
   Button,
@@ -21,6 +27,7 @@ import { TrustNotice } from '../components/TrustStatus';
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
   const { publicKey } = useWallet();
+  const { subjectId, walletAddress } = useSubject();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isNew = !id;
@@ -50,6 +57,11 @@ export function ProductEditPage() {
       setError('');
 
       try {
+        assertSellerActionAllowed('catalog_save', {
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        });
         const payload = {
           id: data.id,
           name: data.name,
@@ -72,6 +84,15 @@ export function ProductEditPage() {
 
         if (COMMERCE_DEMO_MODE) {
           upsertDemoCatalogItem(payload as BecknItem);
+          recordSellerActionAuditEvent({
+            action: 'catalog_save',
+            targetId: data.id,
+            walletAddress,
+            subjectId,
+            trustState: trust.state,
+            outcome: 'applied',
+            reason: isNew ? 'Created seller catalog item in demo mode.' : 'Updated seller catalog item in demo mode.',
+          });
           clearConsumedSellerDraft(isNew ? null : id ?? null);
           navigate('/catalog');
           return;
@@ -82,23 +103,46 @@ export function ProductEditPage() {
 
         const response = await fetch(url, {
           method,
-          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          headers: buildSellerActionHeaders({
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+          }),
           body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
           throw new Error('Failed to save product');
         }
+        recordSellerActionAuditEvent({
+          action: 'catalog_save',
+          targetId: data.id,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: isNew ? 'Created seller catalog item through commerce API.' : 'Updated seller catalog item through commerce API.',
+        });
 
         clearConsumedSellerDraft(isNew ? null : id ?? null);
         navigate('/catalog');
       } catch (err) {
+        recordSellerActionAuditEvent({
+          action: 'catalog_save',
+          targetId: data.id,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'blocked',
+          reason: err instanceof Error ? err.message : 'Catalog save blocked.',
+        });
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         setLoading(false);
       }
     },
-    [isNew, id, navigate]
+    [isNew, id, navigate, subjectId, trust.state, walletAddress]
   );
 
   const handleCancel = useCallback(() => {

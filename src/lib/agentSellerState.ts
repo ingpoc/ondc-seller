@@ -12,6 +12,7 @@ import {
   listSellerActionAuditEvents,
   recordSellerActionAuditEvent,
 } from './localSellerAudit';
+import { evaluateSellerActionPolicy, type SellerActionContext } from './sellerActionPolicy';
 import type {
   SellerAgentAction,
   SellerAgentPatchResult,
@@ -424,22 +425,49 @@ export function extractSellerAgentEnvelope(rawContent: string): SellerAgentRespo
 export function applySellerAgentEnvelope(
   envelope: SellerAgentResponseEnvelope,
   trustState: PortfolioTrustState,
+  options: { approved?: boolean; actor?: Omit<SellerActionContext, 'trustState'> } = {},
 ): SellerAgentPatchResult {
   const nextCatalog = getDemoCatalogItems();
   const flagDiagnostics: SellerCatalogDiagnostic[] = [];
   let navigateTo: string | null = null;
   let trustBlockReason: string | null = null;
+  let pendingApproval = false;
+  const actionContext: SellerActionContext = {
+    trustState,
+    walletAddress: options.actor?.walletAddress,
+    subjectId: options.actor?.subjectId,
+    sessionId: options.actor?.sessionId,
+  };
 
   for (const action of envelope.actions) {
     if (action.type === 'catalog_patch') {
-      if (trustState !== 'verified') {
-        trustBlockReason = 'Publishing catalog changes still requires verified seller trust in AadhaarChain.';
+      const decision = evaluateSellerActionPolicy('catalog_patch', actionContext);
+      if (!decision.allowed) {
+        trustBlockReason = decision.reason;
         recordSellerActionAuditEvent({
           action: 'catalog_patch',
           targetId: action.target_item_id,
+          walletAddress: actionContext.walletAddress,
+          subjectId: actionContext.subjectId,
+          sessionId: actionContext.sessionId,
           trustState,
           outcome: 'blocked',
           reason: trustBlockReason,
+        });
+        continue;
+      }
+      if (!options.approved) {
+        pendingApproval = true;
+        trustBlockReason = 'Review and approve the proposed catalog change before it writes to seller data.';
+        recordSellerActionAuditEvent({
+          action: 'catalog_patch',
+          targetId: action.target_item_id,
+          walletAddress: actionContext.walletAddress,
+          subjectId: actionContext.subjectId,
+          sessionId: actionContext.sessionId,
+          trustState,
+          outcome: 'pending_approval',
+          reason: action.reason,
         });
         continue;
       }
@@ -455,6 +483,9 @@ export function applySellerAgentEnvelope(
       recordSellerActionAuditEvent({
         action: 'catalog_patch',
         targetId: patched.id,
+        walletAddress: actionContext.walletAddress,
+        subjectId: actionContext.subjectId,
+        sessionId: actionContext.sessionId,
         trustState,
         outcome: 'applied',
         reason: action.reason,
@@ -486,14 +517,33 @@ export function applySellerAgentEnvelope(
     }
 
     if (action.type === 'order_followup_note') {
-      if (trustState !== 'verified') {
-        trustBlockReason = 'Order follow-up notes require verified seller trust before the agent can write to order history.';
+      const decision = evaluateSellerActionPolicy('order_followup_note', actionContext);
+      if (!decision.allowed) {
+        trustBlockReason = decision.reason;
         recordSellerActionAuditEvent({
           action: 'order_followup_note',
           targetId: action.order_id,
+          walletAddress: actionContext.walletAddress,
+          subjectId: actionContext.subjectId,
+          sessionId: actionContext.sessionId,
           trustState,
           outcome: 'blocked',
           reason: trustBlockReason,
+        });
+        continue;
+      }
+      if (!options.approved) {
+        pendingApproval = true;
+        trustBlockReason = 'Review and approve the proposed order note before it writes to seller order history.';
+        recordSellerActionAuditEvent({
+          action: 'order_followup_note',
+          targetId: action.order_id,
+          walletAddress: actionContext.walletAddress,
+          subjectId: actionContext.subjectId,
+          sessionId: actionContext.sessionId,
+          trustState,
+          outcome: 'pending_approval',
+          reason: action.next_step ?? action.note,
         });
         continue;
       }
@@ -502,6 +552,9 @@ export function applySellerAgentEnvelope(
       recordSellerActionAuditEvent({
         action: 'order_followup_note',
         targetId: action.order_id,
+        walletAddress: actionContext.walletAddress,
+        subjectId: actionContext.subjectId,
+        sessionId: actionContext.sessionId,
         trustState,
         outcome: 'applied',
         reason: action.next_step ?? action.note,
@@ -536,6 +589,7 @@ export function applySellerAgentEnvelope(
     auditEvents: listSellerActionAuditEvents(),
     navigateTo,
     trustBlockReason,
+    pendingApproval,
   };
 }
 

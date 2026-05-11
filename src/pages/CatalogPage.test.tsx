@@ -19,6 +19,14 @@ vi.mock('../hooks/useTrustState', () => ({
   useTrustState: (...args: unknown[]) => mockUseTrustState(...args),
 }));
 
+vi.mock('../hooks/useSubject', () => ({
+  useSubject: () => ({
+    subjectId: 'seller-subject-test',
+    walletAddress: 'wallet-test-123',
+    authLoading: false,
+  }),
+}));
+
 vi.mock('../hooks/useApi', () => ({
   useApi: (...args: unknown[]) => mockUseApi(...args),
 }));

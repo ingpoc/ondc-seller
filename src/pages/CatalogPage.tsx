@@ -12,11 +12,17 @@ import {
   StatCard,
 } from '@/components/seller-ui';
 import { useApi } from '../hooks/useApi';
+import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { InventoryTable } from '../components';
 import { TrustNotice } from '../components/TrustStatus';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { deleteDemoCatalogItem } from '../lib/mockCatalog';
+import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
+import {
+  assertSellerActionAllowed,
+  buildSellerActionHeaders,
+} from '../lib/sellerActionPolicy';
 
 type CatalogItem = BecknItem & {
   descriptor?: BecknItem['descriptor'] & {
@@ -45,6 +51,7 @@ export function CatalogPage() {
   const [searchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim().toLowerCase();
   const { publicKey } = useWallet();
+  const { subjectId, walletAddress } = useSubject();
   const trust = useTrustState(publicKey?.toBase58() ?? null);
   const { data, loading, error, execute } = useApi('/api/catalog');
   const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
@@ -104,6 +111,24 @@ export function CatalogPage() {
       if (trustBlocksCatalog) {
         return;
       }
+      try {
+        assertSellerActionAllowed('catalog_delete', {
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        });
+      } catch (error) {
+        recordSellerActionAuditEvent({
+          action: 'catalog_delete',
+          targetId: itemId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'blocked',
+          reason: error instanceof Error ? error.message : 'Catalog delete blocked.',
+        });
+        return;
+      }
 
       const confirmed = window.confirm('Delete this product from the catalog?');
       if (!confirmed) {
@@ -112,21 +137,45 @@ export function CatalogPage() {
 
       if (COMMERCE_DEMO_MODE) {
         deleteDemoCatalogItem(itemId);
+        recordSellerActionAuditEvent({
+          action: 'catalog_delete',
+          targetId: itemId,
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Deleted seller catalog item in demo mode.',
+        });
         await execute();
         return;
       }
 
       const response = await fetch(buildCommerceUrl(`/api/catalog/products/${itemId}`), {
         method: 'DELETE',
+        credentials: 'include',
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
       });
 
       if (!response.ok) {
         throw new Error(`Failed to delete product ${itemId}`);
       }
+      recordSellerActionAuditEvent({
+        action: 'catalog_delete',
+        targetId: itemId,
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Deleted seller catalog item through commerce API.',
+      });
 
       await execute();
     },
-    [execute, trustBlocksCatalog]
+    [execute, subjectId, trust.state, trustBlocksCatalog, walletAddress]
   );
 
   return (

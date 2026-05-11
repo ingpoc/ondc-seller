@@ -13,14 +13,20 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { TrustNotice } from '../components/TrustStatus';
+import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
   canMutateSellerConfig,
   readLocalSellerConfig,
   saveVerifiedLocalSellerConfig,
   type SellerClientConfig,
 } from '../lib/localSellerConfig';
+import {
+  buildSellerActionHeaders,
+  evaluateSellerActionPolicy,
+} from '../lib/sellerActionPolicy';
 
 interface ConfigError {
   field: string;
@@ -62,6 +68,7 @@ function createDemoPrivateKey(): string {
 
 export function ConfigPage() {
   const { publicKey } = useWallet();
+  const { subjectId, walletAddress } = useSubject();
   const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [config, setConfig] = useState<SellerClientConfig>(INITIAL_CONFIG);
   const [errors, setErrors] = useState<ConfigError[]>([]);
@@ -137,6 +144,20 @@ export function ConfigPage() {
     }
 
     if (!canChangeConfiguration) {
+      const decision = evaluateSellerActionPolicy('seller_config_save', {
+        trustState: trust.state,
+        walletAddress,
+        subjectId,
+      });
+      recordSellerActionAuditEvent({
+        action: 'seller_config_save',
+        targetId: config.subscriberId || 'seller-config',
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'blocked',
+        reason: decision.reason,
+      });
       setTestResult({
         success: false,
         message: 'Verified seller trust is required before changing payout or seller configuration.',
@@ -148,6 +169,15 @@ export function ConfigPage() {
     try {
       if (COMMERCE_DEMO_MODE) {
         saveVerifiedLocalSellerConfig(config, trust.state);
+        recordSellerActionAuditEvent({
+          action: 'seller_config_save',
+          targetId: config.subscriberId || 'seller-config',
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Saved seller configuration in demo mode.',
+        });
         setTestResult({
           success: true,
           message: 'Configuration saved locally for browser testing.',
@@ -158,7 +188,11 @@ export function ConfigPage() {
       const response = await fetch(buildCommerceUrl('/api/seller/config'), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
         body: JSON.stringify(config),
       });
 
@@ -166,8 +200,26 @@ export function ConfigPage() {
         throw new Error('Failed to save configuration');
       }
 
+      recordSellerActionAuditEvent({
+        action: 'seller_config_save',
+        targetId: config.subscriberId || 'seller-config',
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Saved seller configuration through commerce API.',
+      });
       setTestResult({ success: true, message: 'Configuration saved successfully.' });
     } catch (err) {
+      recordSellerActionAuditEvent({
+        action: 'seller_config_save',
+        targetId: config.subscriberId || 'seller-config',
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'blocked',
+        reason: err instanceof Error ? err.message : 'Failed to save configuration.',
+      });
       setTestResult({
         success: false,
         message: err instanceof Error ? err.message : 'Failed to save configuration.',
@@ -180,12 +232,35 @@ export function ConfigPage() {
   async function handleGenerateKeyPair() {
     try {
       if (!canChangeConfiguration) {
+        const decision = evaluateSellerActionPolicy('seller_config_generate_keys', {
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        });
+        recordSellerActionAuditEvent({
+          action: 'seller_config_generate_keys',
+          targetId: config.subscriberId || 'seller-config',
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'blocked',
+          reason: decision.reason,
+        });
         throw new Error(
           'Verified seller trust is required before changing payout or seller configuration.',
         );
       }
 
       if (COMMERCE_DEMO_MODE) {
+        recordSellerActionAuditEvent({
+          action: 'seller_config_generate_keys',
+          targetId: config.subscriberId || 'seller-config',
+          walletAddress,
+          subjectId,
+          trustState: trust.state,
+          outcome: 'applied',
+          reason: 'Generated demo seller key material.',
+        });
         setConfig((prev) => ({
           ...prev,
           privateKey: createDemoPrivateKey(),
@@ -202,6 +277,11 @@ export function ConfigPage() {
       const response = await fetch(buildCommerceUrl('/api/seller/config/generate-keys'), {
         method: 'POST',
         credentials: 'include',
+        headers: buildSellerActionHeaders({
+          trustState: trust.state,
+          walletAddress,
+          subjectId,
+        }),
       });
       if (!response.ok) {
         throw new Error('Failed to generate key pair');
@@ -212,6 +292,15 @@ export function ConfigPage() {
         privateKey: data.privateKey,
         keyId: `${prev.subscriberId || 'seller'}-${Date.now()}`,
       }));
+      recordSellerActionAuditEvent({
+        action: 'seller_config_generate_keys',
+        targetId: config.subscriberId || 'seller-config',
+        walletAddress,
+        subjectId,
+        trustState: trust.state,
+        outcome: 'applied',
+        reason: 'Generated seller key material through commerce API.',
+      });
       setTestResult({
         success: true,
         message: 'New key pair generated. Remember to save your configuration.',

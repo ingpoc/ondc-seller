@@ -85,6 +85,19 @@ identity, AadhaarChain trust state, policy, and audit writes independently.
 The deterministic backend-side enforcement contract lives in
 `src/lib/sellerBackendEnforcement.ts` so a commerce API or serverless adapter can
 reuse the same fail-closed checks before applying protected seller mutations.
+Deployed `/api/*` traffic is routed through the repo-owned Vercel and Netlify
+serverless gateways, which validate the seller session through the identity
+service, re-read AadhaarChain trust, enforce the action policy, emit a
+`seller_trust_enforcement_audit` event, and then proxy to the configured commerce
+backend.
+
+Server-side enforcement environment variables:
+
+```env
+SELLER_COMMERCE_API_BASE=https://commerce-api.example.com
+SELLER_IDENTITY_API_BASE=https://identity-aadhar-gateway.onrender.com
+SELLER_TRUST_API_BASE=https://identity-aadhar-gateway.onrender.com
+```
 
 ## Development
 

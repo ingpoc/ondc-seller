@@ -4,7 +4,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://ondc-api-gateway.example.com/:splat"
+  to = "/.netlify/functions/api/api/:splat"
   status = 200
 
 [build.environment]

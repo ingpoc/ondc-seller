@@ -16,12 +16,26 @@ export interface SellerActionContext {
   walletAddress?: string | null;
   subjectId?: string | null;
   sessionId?: string | null;
+  auditSubjectId?: string | null;
+  auditReferenceId?: string | null;
 }
 
 export interface SellerActionPolicyDecision {
   allowed: boolean;
   requiredTrustState: PortfolioTrustState;
   reason: string;
+}
+
+export interface SellerBackendActionPolicy {
+  action: SellerSensitiveAction;
+  required_trust_state: 'verified';
+  wallet_address: string;
+  subject_id: string | null;
+  session_id: string | null;
+  audit_subject_id: string;
+  audit_reference_id: string | null;
+  client_observed_trust_state: PortfolioTrustState;
+  enforcement: 'backend_must_revalidate_trust';
 }
 
 const VERIFIED_TRUST_REQUIRED = 'Verified seller trust is required before this seller action can execute.';
@@ -102,12 +116,43 @@ export function assertSellerActionAllowed(
   }
 }
 
-export function buildSellerActionHeaders(context: SellerActionContext): HeadersInit {
+export function buildSellerBackendActionPolicy(
+  action: SellerSensitiveAction,
+  context: SellerActionContext,
+): SellerBackendActionPolicy {
+  assertSellerActionAllowed(action, context);
+
+  if (!context.walletAddress) {
+    throw new Error('Wallet address is required before protected seller actions can be sent.');
+  }
+
+  if (!context.auditSubjectId) {
+    throw new Error('Audit subject is required before protected seller actions can be sent.');
+  }
+
+  return {
+    action,
+    required_trust_state: 'verified',
+    wallet_address: context.walletAddress,
+    subject_id: context.subjectId ?? null,
+    session_id: context.sessionId ?? null,
+    audit_subject_id: context.auditSubjectId,
+    audit_reference_id: context.auditReferenceId ?? null,
+    client_observed_trust_state: context.trustState,
+    enforcement: 'backend_must_revalidate_trust',
+  };
+}
+
+export function buildSellerActionHeaders(policy: SellerBackendActionPolicy): HeadersInit {
   return {
     'Content-Type': 'application/json',
-    'X-Seller-Trust-State': context.trustState,
-    ...(context.walletAddress ? { 'X-Wallet-Address': context.walletAddress } : {}),
-    ...(context.subjectId ? { 'X-User-Id': context.subjectId } : {}),
-    ...(context.sessionId ? { 'X-Seller-Session-Id': context.sessionId } : {}),
+    'X-Seller-Protected-Action': policy.action,
+    'X-Seller-Required-Trust-State': policy.required_trust_state,
+    'X-Seller-Trust-State': policy.client_observed_trust_state,
+    'X-Wallet-Address': policy.wallet_address,
+    'X-Seller-Audit-Subject': policy.audit_subject_id,
+    'X-Seller-Trust-Enforcement': policy.enforcement,
+    ...(policy.subject_id ? { 'X-User-Id': policy.subject_id } : {}),
+    ...(policy.session_id ? { 'X-Seller-Session-Id': policy.session_id } : {}),
   };
 }

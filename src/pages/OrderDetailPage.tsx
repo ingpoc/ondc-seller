@@ -12,6 +12,7 @@ import type { PortfolioTrustState } from '@/lib/trust';
 import { recordSellerActionAuditEvent } from '@/lib/localSellerAudit';
 import {
   buildSellerActionHeaders,
+  buildSellerBackendActionPolicy,
   canExecuteSellerAction,
   type SellerSensitiveAction,
 } from '@/lib/sellerActionPolicy';
@@ -212,11 +213,14 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
         method: 'POST',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('order_accept', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: id,
+          }),
+        ),
       });
       if (!response.ok) throw new Error('Failed to accept order');
       const data = await response.json();
@@ -275,11 +279,15 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
         method: 'POST',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('order_reject', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: id,
+            auditReferenceId: 'seller-rejection',
+          }),
+        ),
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
       });
       if (!response.ok) throw new Error('Failed to reject order');
@@ -340,11 +348,15 @@ export function OrderDetailPage() {
       const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
         method: 'POST',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('order_dispatch', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: id,
+            auditReferenceId: trackingId,
+          }),
+        ),
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
       });
       if (!response.ok) throw new Error('Failed to dispatch order');

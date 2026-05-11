@@ -22,6 +22,7 @@ import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
   assertSellerActionAllowed,
   buildSellerActionHeaders,
+  buildSellerBackendActionPolicy,
 } from '../lib/sellerActionPolicy';
 
 type CatalogItem = BecknItem & {
@@ -153,11 +154,15 @@ export function CatalogPage() {
       const response = await fetch(buildCommerceUrl(`/api/catalog/products/${itemId}`), {
         method: 'DELETE',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('catalog_delete', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: itemId,
+            auditReferenceId: 'catalog-delete',
+          }),
+        ),
       });
 
       if (!response.ok) {

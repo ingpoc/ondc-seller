@@ -77,9 +77,11 @@ before calling commerce endpoints:
 
 Every sensitive local/demo write records an audit event with action, target,
 wallet, subject, session when available, trust state, timestamp, outcome, and
-reason. Commerce API calls include trust/session headers so the backend can
-repeat the same policy server-side; production must treat these client headers as
-context only and verify session, wallet identity, and trust state independently.
+reason. Commerce API calls are built from a typed backend policy envelope with
+`enforcement: "backend_must_revalidate_trust"` and include protected-action,
+required-trust, observed-trust, wallet, and audit-subject headers. Production
+must treat these client headers as context only and verify session, wallet
+identity, AadhaarChain trust state, policy, and audit writes independently.
 
 ## Development
 

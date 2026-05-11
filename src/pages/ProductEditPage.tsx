@@ -14,6 +14,7 @@ import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
   assertSellerActionAllowed,
   buildSellerActionHeaders,
+  buildSellerBackendActionPolicy,
 } from '../lib/sellerActionPolicy';
 import {
   Alert,
@@ -104,11 +105,15 @@ export function ProductEditPage() {
         const response = await fetch(url, {
           method,
           credentials: 'include',
-          headers: buildSellerActionHeaders({
-            trustState: trust.state,
-            walletAddress,
-            subjectId,
-          }),
+          headers: buildSellerActionHeaders(
+            buildSellerBackendActionPolicy('catalog_save', {
+              trustState: trust.state,
+              walletAddress,
+              subjectId,
+              auditSubjectId: data.id,
+              auditReferenceId: isNew ? 'catalog-create' : id,
+            }),
+          ),
           body: JSON.stringify(payload),
         });
 

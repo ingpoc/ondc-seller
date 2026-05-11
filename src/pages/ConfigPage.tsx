@@ -25,6 +25,7 @@ import {
 } from '../lib/localSellerConfig';
 import {
   buildSellerActionHeaders,
+  buildSellerBackendActionPolicy,
   evaluateSellerActionPolicy,
 } from '../lib/sellerActionPolicy';
 
@@ -188,11 +189,14 @@ export function ConfigPage() {
       const response = await fetch(buildCommerceUrl('/api/seller/config'), {
         method: 'POST',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('seller_config_save', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: config.subscriberId || 'seller-config',
+          }),
+        ),
         body: JSON.stringify(config),
       });
 
@@ -277,11 +281,15 @@ export function ConfigPage() {
       const response = await fetch(buildCommerceUrl('/api/seller/config/generate-keys'), {
         method: 'POST',
         credentials: 'include',
-        headers: buildSellerActionHeaders({
-          trustState: trust.state,
-          walletAddress,
-          subjectId,
-        }),
+        headers: buildSellerActionHeaders(
+          buildSellerBackendActionPolicy('seller_config_generate_keys', {
+            trustState: trust.state,
+            walletAddress,
+            subjectId,
+            auditSubjectId: config.subscriberId || 'seller-config',
+            auditReferenceId: 'generate-keys',
+          }),
+        ),
       });
       if (!response.ok) {
         throw new Error('Failed to generate key pair');

@@ -486,6 +486,18 @@ export function applySellerAgentEnvelope(
     }
 
     if (action.type === 'order_followup_note') {
+      if (trustState !== 'verified') {
+        trustBlockReason = 'Order follow-up notes require verified seller trust before the agent can write to order history.';
+        recordSellerActionAuditEvent({
+          action: 'order_followup_note',
+          targetId: action.order_id,
+          trustState,
+          outcome: 'blocked',
+          reason: trustBlockReason,
+        });
+        continue;
+      }
+
       addSellerOrderNote(action.order_id, action.note, action.next_step);
       recordSellerActionAuditEvent({
         action: 'order_followup_note',

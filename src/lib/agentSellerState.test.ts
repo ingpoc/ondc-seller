@@ -179,7 +179,7 @@ describe('agentSellerState', () => {
     });
   });
 
-  it('applies seller actions to local draft and notes state', () => {
+  it('applies seller drafts but blocks order notes without verified trust', () => {
     const result = applySellerAgentEnvelope(
       {
         summary: 'Queued a draft and added an order note.',
@@ -211,7 +211,13 @@ describe('agentSellerState', () => {
     expect(result.summary).toContain('Queued a draft');
     expect(result.navigateTo).toBe('/catalog/demo-basmati-rice?draft=agent');
     expect(readSellerAgentDraft()?.draft.description).toContain('Verified farm source');
-    expect(listSellerOrderNotesForOrder('seller-demo-1001')[0]?.note).toContain('confirm delivery slot');
+    expect(listSellerOrderNotesForOrder('seller-demo-1001')).toEqual([]);
+    expect(result.auditEvents[0]).toMatchObject({
+      action: 'order_followup_note',
+      target_id: 'seller-demo-1001',
+      trust_state: 'identity_present_unverified',
+      outcome: 'blocked',
+    });
   });
 
   it('blocks direct catalog patches when seller trust is not verified', () => {
@@ -350,7 +356,7 @@ describe('agentSellerState', () => {
     });
   });
 
-  it('records seller order-note audit events with trust context', () => {
+  it.each(TRUST_STATES)('applies order-note write trust policy for %s', (trustState) => {
     const result = applySellerAgentEnvelope(
       {
         summary: 'Record buyer follow-up.',
@@ -363,17 +369,30 @@ describe('agentSellerState', () => {
           },
         ],
       },
-      'manual_review',
+      trustState,
     );
 
-    expect(listSellerOrderNotesForOrder('seller-demo-1001')[0]?.note).toBe('Confirm delivery window.');
+    if (trustState === 'verified') {
+      expect(result.trustBlockReason).toBeNull();
+      expect(listSellerOrderNotesForOrder('seller-demo-1001')[0]?.note).toBe('Confirm delivery window.');
+      expect(result.auditEvents[0]).toMatchObject({
+        action: 'order_followup_note',
+        target_id: 'seller-demo-1001',
+        trust_state: 'verified',
+        outcome: 'applied',
+      });
+      expect(listSellerActionAuditEvents()[0]?.reason).toBe('Call buyer before dispatch.');
+      return;
+    }
+
+    expect(result.trustBlockReason).toContain('verified seller trust');
+    expect(listSellerOrderNotesForOrder('seller-demo-1001')).toEqual([]);
     expect(result.auditEvents[0]).toMatchObject({
       action: 'order_followup_note',
       target_id: 'seller-demo-1001',
-      trust_state: 'manual_review',
-      outcome: 'applied',
+      trust_state: trustState,
+      outcome: 'blocked',
     });
-    expect(listSellerActionAuditEvents()[0]?.reason).toBe('Call buyer before dispatch.');
   });
 
   it('builds a seller snapshot with catalog, diagnostics, and pending draft state', () => {

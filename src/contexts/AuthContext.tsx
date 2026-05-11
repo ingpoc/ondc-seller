@@ -1,3 +1,8 @@
+/**
+ * AUTH-COMPOSITION: deployed_public_mode=compatibility_probe_only
+ * AUTH-COMPOSITION: local_dev_mode=identity_session_experiment
+ */
+
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { SSOUser } from '@/lib/api';
 import { IDENTITY_URL, IDENTITY_WEB_URL } from '@/lib/identityUrls';
@@ -15,11 +20,11 @@ export interface AuthContextValue {
   loading: boolean;
   /** Any authentication error */
   error: string | null;
-  /** Login to SSO provider */
+  /** Login to the identity-session provider */
   login: (returnUrl?: string) => void;
-  /** Logout from SSO provider */
+  /** Logout from the identity-session provider */
   logout: () => void;
-  /** Refresh user session from SSO */
+  /** Refresh user state from the identity-session provider */
   refresh: () => Promise<void>;
 }
 

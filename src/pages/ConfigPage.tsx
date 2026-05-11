@@ -16,8 +16,9 @@ import { TrustNotice } from '../components/TrustStatus';
 import { useTrustState } from '../hooks/useTrustState';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
+  canMutateSellerConfig,
   readLocalSellerConfig,
-  saveLocalSellerConfig,
+  saveVerifiedLocalSellerConfig,
   type SellerClientConfig,
 } from '../lib/localSellerConfig';
 
@@ -68,6 +69,7 @@ export function ConfigPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const canChangeConfiguration = !trust.loading && canMutateSellerConfig(trust.state);
 
   useEffect(() => {
     void loadConfig();
@@ -134,10 +136,18 @@ export function ConfigPage() {
       return;
     }
 
+    if (!canChangeConfiguration) {
+      setTestResult({
+        success: false,
+        message: 'Verified seller trust is required before changing payout or seller configuration.',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       if (COMMERCE_DEMO_MODE) {
-        saveLocalSellerConfig(config);
+        saveVerifiedLocalSellerConfig(config, trust.state);
         setTestResult({
           success: true,
           message: 'Configuration saved locally for browser testing.',
@@ -169,6 +179,12 @@ export function ConfigPage() {
 
   async function handleGenerateKeyPair() {
     try {
+      if (!canChangeConfiguration) {
+        throw new Error(
+          'Verified seller trust is required before changing payout or seller configuration.',
+        );
+      }
+
       if (COMMERCE_DEMO_MODE) {
         setConfig((prev) => ({
           ...prev,
@@ -374,7 +390,13 @@ export function ConfigPage() {
                     >
                       {showPrivateKey ? 'Hide key' : 'Show key'}
                     </Button>
-                    <Button type="button" variant="secondary" size="sm" onClick={() => void handleGenerateKeyPair()}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={!canChangeConfiguration}
+                      onClick={() => void handleGenerateKeyPair()}
+                    >
                       Generate key pair
                     </Button>
                   </div>
@@ -467,7 +489,7 @@ export function ConfigPage() {
         </Card>
 
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading || !canChangeConfiguration}>
             {loading ? 'Saving…' : 'Save configuration'}
           </Button>
           <Button

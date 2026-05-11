@@ -1,4 +1,8 @@
+import type { PortfolioTrustState } from './trust';
+
 const LOCAL_CONFIG_STORAGE_KEY = 'ondc-seller-local-config';
+const VERIFIED_CONFIG_MESSAGE =
+  'Verified seller trust is required before changing payout or seller configuration.';
 
 export interface SellerClientConfig {
   baseUrl: string;
@@ -34,6 +38,24 @@ export function saveLocalSellerConfig(config: SellerClientConfig) {
   }
 
   window.localStorage.setItem(LOCAL_CONFIG_STORAGE_KEY, JSON.stringify(config));
+}
+
+export function canMutateSellerConfig(trustState: PortfolioTrustState): boolean {
+  return trustState === 'verified';
+}
+
+export function assertCanMutateSellerConfig(trustState: PortfolioTrustState): void {
+  if (!canMutateSellerConfig(trustState)) {
+    throw new Error(VERIFIED_CONFIG_MESSAGE);
+  }
+}
+
+export function saveVerifiedLocalSellerConfig(
+  config: SellerClientConfig,
+  trustState: PortfolioTrustState,
+) {
+  assertCanMutateSellerConfig(trustState);
+  saveLocalSellerConfig(config);
 }
 
 export function getLocalSellerConfigSummary() {

@@ -7,6 +7,15 @@ import {
 import { clearSellerAgentDraft, readSellerAgentDraft } from './localSellerDraft';
 import { getDemoCatalogItems, saveDemoCatalogItems } from './mockCatalog';
 import { listSellerOrderNotesForOrder } from './localSellerOrders';
+import type { PortfolioTrustState } from './trust';
+
+const TRUST_STATES: PortfolioTrustState[] = [
+  'no_identity',
+  'identity_present_unverified',
+  'verified',
+  'manual_review',
+  'revoked_or_blocked',
+];
 
 describe('agentSellerState', () => {
   beforeEach(() => {
@@ -289,6 +298,42 @@ describe('agentSellerState', () => {
     expect(updated?.price?.currency).toBe('INR');
     expect(updated?.price?.value).toBe('299.00');
     expect(updated?.category?.name).toBeTruthy();
+  });
+
+  it.each(TRUST_STATES)('applies catalog write trust policy for %s', (trustState) => {
+    const before = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    expect(before).toBeTruthy();
+
+    const result = applySellerAgentEnvelope(
+      {
+        summary: 'Patch a live listing.',
+        actions: [
+          {
+            type: 'catalog_patch',
+            target_item_id: 'demo-cold-pressed-oil',
+            reason: 'Trust matrix fixture.',
+            patch: {
+              description: `Updated description for ${trustState}.`,
+              price: '333.00',
+            },
+          },
+        ],
+      },
+      trustState,
+    );
+
+    const after = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+
+    if (trustState === 'verified') {
+      expect(result.trustBlockReason).toBeNull();
+      expect(after?.descriptor?.short_desc).toBe(`Updated description for ${trustState}.`);
+      expect(after?.price?.value).toBe('333.00');
+      return;
+    }
+
+    expect(result.trustBlockReason).toContain('verified');
+    expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
+    expect(after?.price?.value).toBe(before?.price?.value);
   });
 
   it('builds a seller snapshot with catalog, diagnostics, and pending draft state', () => {

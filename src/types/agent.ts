@@ -177,6 +177,16 @@ export interface SellerOrderNote {
   created_at: string;
 }
 
+export interface SellerActionAuditEvent {
+  id: string;
+  action: 'catalog_patch' | 'order_followup_note';
+  target_id: string;
+  trust_state: PortfolioTrustState;
+  outcome: 'applied' | 'blocked';
+  reason: string;
+  created_at: string;
+}
+
 export interface SellerAgentPatchResult {
   summary: string;
   actions: SellerAgentAction[];
@@ -184,6 +194,7 @@ export interface SellerAgentPatchResult {
   diagnostics: SellerCatalogDiagnostic[];
   pendingDraft: ProductFormData | null;
   orderNotes: Record<string, SellerOrderNote[]>;
+  auditEvents: SellerActionAuditEvent[];
   navigateTo: string | null;
   trustBlockReason: string | null;
 }

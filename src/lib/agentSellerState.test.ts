@@ -5,6 +5,7 @@ import {
   extractSellerAgentEnvelope,
 } from './agentSellerState';
 import { clearSellerAgentDraft, readSellerAgentDraft } from './localSellerDraft';
+import { clearSellerActionAuditEvents, listSellerActionAuditEvents } from './localSellerAudit';
 import { getDemoCatalogItems, saveDemoCatalogItems } from './mockCatalog';
 import { listSellerOrderNotesForOrder } from './localSellerOrders';
 import type { PortfolioTrustState } from './trust';
@@ -22,6 +23,7 @@ describe('agentSellerState', () => {
     window.localStorage.clear();
     saveDemoCatalogItems(getDemoCatalogItems());
     clearSellerAgentDraft();
+    clearSellerActionAuditEvents();
   });
 
   it('extracts a structured seller envelope from json content', () => {
@@ -328,12 +330,50 @@ describe('agentSellerState', () => {
       expect(result.trustBlockReason).toBeNull();
       expect(after?.descriptor?.short_desc).toBe(`Updated description for ${trustState}.`);
       expect(after?.price?.value).toBe('333.00');
+      expect(result.auditEvents[0]).toMatchObject({
+        action: 'catalog_patch',
+        target_id: 'demo-cold-pressed-oil',
+        trust_state: 'verified',
+        outcome: 'applied',
+      });
       return;
     }
 
     expect(result.trustBlockReason).toContain('verified');
     expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
     expect(after?.price?.value).toBe(before?.price?.value);
+    expect(result.auditEvents[0]).toMatchObject({
+      action: 'catalog_patch',
+      target_id: 'demo-cold-pressed-oil',
+      trust_state: trustState,
+      outcome: 'blocked',
+    });
+  });
+
+  it('records seller order-note audit events with trust context', () => {
+    const result = applySellerAgentEnvelope(
+      {
+        summary: 'Record buyer follow-up.',
+        actions: [
+          {
+            type: 'order_followup_note',
+            order_id: 'seller-demo-1001',
+            note: 'Confirm delivery window.',
+            next_step: 'Call buyer before dispatch.',
+          },
+        ],
+      },
+      'manual_review',
+    );
+
+    expect(listSellerOrderNotesForOrder('seller-demo-1001')[0]?.note).toBe('Confirm delivery window.');
+    expect(result.auditEvents[0]).toMatchObject({
+      action: 'order_followup_note',
+      target_id: 'seller-demo-1001',
+      trust_state: 'manual_review',
+      outcome: 'applied',
+    });
+    expect(listSellerActionAuditEvents()[0]?.reason).toBe('Call buyer before dispatch.');
   });
 
   it('builds a seller snapshot with catalog, diagnostics, and pending draft state', () => {

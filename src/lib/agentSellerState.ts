@@ -8,6 +8,10 @@ import {
   listDemoSellerOrders,
   listSellerOrderNotes,
 } from './localSellerOrders';
+import {
+  listSellerActionAuditEvents,
+  recordSellerActionAuditEvent,
+} from './localSellerAudit';
 import type {
   SellerAgentAction,
   SellerAgentPatchResult,
@@ -430,6 +434,13 @@ export function applySellerAgentEnvelope(
     if (action.type === 'catalog_patch') {
       if (trustState !== 'verified') {
         trustBlockReason = 'Publishing catalog changes still requires verified seller trust in AadhaarChain.';
+        recordSellerActionAuditEvent({
+          action: 'catalog_patch',
+          targetId: action.target_item_id,
+          trustState,
+          outcome: 'blocked',
+          reason: trustBlockReason,
+        });
         continue;
       }
 
@@ -441,6 +452,13 @@ export function applySellerAgentEnvelope(
       } else {
         nextCatalog.unshift(patched);
       }
+      recordSellerActionAuditEvent({
+        action: 'catalog_patch',
+        targetId: patched.id,
+        trustState,
+        outcome: 'applied',
+        reason: action.reason,
+      });
       continue;
     }
 
@@ -469,6 +487,13 @@ export function applySellerAgentEnvelope(
 
     if (action.type === 'order_followup_note') {
       addSellerOrderNote(action.order_id, action.note, action.next_step);
+      recordSellerActionAuditEvent({
+        action: 'order_followup_note',
+        targetId: action.order_id,
+        trustState,
+        outcome: 'applied',
+        reason: action.next_step ?? action.note,
+      });
       continue;
     }
 
@@ -496,6 +521,7 @@ export function applySellerAgentEnvelope(
     diagnostics: [...buildSellerDiagnostics(nextCatalog), ...flagDiagnostics],
     pendingDraft,
     orderNotes: listSellerOrderNotes(),
+    auditEvents: listSellerActionAuditEvents(),
     navigateTo,
     trustBlockReason,
   };

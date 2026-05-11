@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import type { UCPOrderStatus } from '@ondc-sdk/shared';
 
 // Import the component to ensure TypeScript compilation
-import { OrderDetailPage } from './OrderDetailPage';
+import { canMutateSellerOrder, OrderDetailPage } from './OrderDetailPage';
 
 describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
   it('should export OrderDetailPage component', () => {
@@ -40,6 +40,27 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
       expect(canDispatchOrder('packed')).toBe(true);
       expect(canDispatchOrder('created')).toBe(false);
       expect(canDispatchOrder('shipped')).toBe(false);
+    });
+  });
+
+  describe('Seller order trust policy', () => {
+    it('requires verified trust before order acceptance', () => {
+      expect(canMutateSellerOrder('created', 'accept', 'verified')).toBe(true);
+      expect(canMutateSellerOrder('created', 'accept', 'manual_review')).toBe(false);
+      expect(canMutateSellerOrder('created', 'accept', 'revoked_or_blocked')).toBe(false);
+    });
+
+    it('requires verified trust before order rejection', () => {
+      expect(canMutateSellerOrder('created', 'reject', 'verified')).toBe(true);
+      expect(canMutateSellerOrder('created', 'reject', 'identity_present_unverified')).toBe(false);
+      expect(canMutateSellerOrder('accepted', 'reject', 'verified')).toBe(false);
+    });
+
+    it('requires verified trust before dispatching accepted or packed orders', () => {
+      expect(canMutateSellerOrder('accepted', 'dispatch', 'verified')).toBe(true);
+      expect(canMutateSellerOrder('packed', 'dispatch', 'verified')).toBe(true);
+      expect(canMutateSellerOrder('accepted', 'dispatch', 'no_identity')).toBe(false);
+      expect(canMutateSellerOrder('created', 'dispatch', 'verified')).toBe(false);
     });
   });
 

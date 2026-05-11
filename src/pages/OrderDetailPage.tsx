@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useWallet } from '@solana/wallet-adapter-react';
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { TrustNotice } from '@/components/TrustStatus';
+import { useTrustState } from '@/hooks';
+import type { PortfolioTrustState } from '@/lib/trust';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
@@ -18,6 +22,18 @@ const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created'
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canDispatchOrder = (status: UCPOrderStatus): boolean =>
   ['accepted', 'packed'].includes(status);
+type SellerOrderMutation = 'accept' | 'reject' | 'dispatch';
+
+export function canMutateSellerOrder(
+  status: UCPOrderStatus,
+  mutation: SellerOrderMutation,
+  trustState: PortfolioTrustState,
+): boolean {
+  if (trustState !== 'verified') return false;
+  if (mutation === 'accept') return canAcceptOrder(status);
+  if (mutation === 'reject') return canRejectOrder(status);
+  return canDispatchOrder(status);
+}
 
 const STATUS_LABELS: Record<UCPOrderStatus, string> = {
   created: 'Pending',
@@ -106,6 +122,8 @@ function formatDate(value?: string) {
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { publicKey } = useWallet();
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [order, setOrder] = useState<UCPOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +166,10 @@ export function OrderDetailPage() {
 
   async function handleAccept() {
     if (!order || !id) return;
+    if (!canMutateSellerOrder(order.status, 'accept', trust.state)) {
+      setError('Verified seller trust is required before accepting orders.');
+      return;
+    }
     setProcessing('accept');
     try {
       if (COMMERCE_DEMO_MODE) {
@@ -173,6 +195,10 @@ export function OrderDetailPage() {
 
   async function handleReject() {
     if (!order || !id) return;
+    if (!canMutateSellerOrder(order.status, 'reject', trust.state)) {
+      setError('Verified seller trust is required before rejecting orders.');
+      return;
+    }
     if (!confirm('Are you sure you want to reject this order?')) return;
 
     setProcessing('reject');
@@ -202,6 +228,10 @@ export function OrderDetailPage() {
 
   async function handleDispatch() {
     if (!order || !id) return;
+    if (!canMutateSellerOrder(order.status, 'dispatch', trust.state)) {
+      setError('Verified seller trust is required before dispatching orders.');
+      return;
+    }
     const trackingId = prompt('Enter tracking ID:');
     if (!trackingId) return;
 
@@ -292,23 +322,37 @@ export function OrderDetailPage() {
         <Badge className={getStatusTone(order.status)}>{STATUS_LABELS[order.status]}</Badge>
       </div>
 
+      <TrustNotice
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        actionLabel="Resolve seller trust"
+      />
+
       <div className="flex flex-wrap gap-3">
         {canAcceptOrder(order.status) ? (
-          <Button disabled={processing === 'accept'} onClick={() => void handleAccept()}>
+          <Button
+            disabled={processing === 'accept' || trust.loading || !canMutateSellerOrder(order.status, 'accept', trust.state)}
+            onClick={() => void handleAccept()}
+          >
             {processing === 'accept' ? 'Processing…' : 'Accept order'}
           </Button>
         ) : null}
         {canRejectOrder(order.status) ? (
           <Button
             variant="destructive"
-            disabled={processing === 'reject'}
+            disabled={processing === 'reject' || trust.loading || !canMutateSellerOrder(order.status, 'reject', trust.state)}
             onClick={() => void handleReject()}
           >
             {processing === 'reject' ? 'Processing…' : 'Reject order'}
           </Button>
         ) : null}
         {canDispatchOrder(order.status) ? (
-          <Button disabled={processing === 'dispatch'} onClick={() => void handleDispatch()}>
+          <Button
+            disabled={processing === 'dispatch' || trust.loading || !canMutateSellerOrder(order.status, 'dispatch', trust.state)}
+            onClick={() => void handleDispatch()}
+          >
             {processing === 'dispatch' ? 'Processing…' : 'Dispatch order'}
           </Button>
         ) : null}

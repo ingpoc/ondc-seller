@@ -30,13 +30,20 @@ import { normalizeLoopbackUrl } from './lib/loopback';
 import type { PortfolioTrustState } from './lib/trust';
 import { cn } from './lib/utils';
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  external?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/catalog', label: 'Catalog' },
   { href: '/orders', label: 'Orders' },
   { href: '/config', label: 'Config' },
   { href: '/agent', label: 'Agent' },
-] as const;
+  { href: '/usecase.html#agents', label: 'Use Case', external: true },
+];
 
 const IDENTITY_WEB_URL = normalizeLoopbackUrl(
   import.meta.env.VITE_IDENTITY_WEB_URL || 'http://127.0.0.1:43100',
@@ -165,12 +172,26 @@ function NavigationLink({
   label,
   active,
   onNavigate,
+  external,
 }: {
   href: string;
   label: string;
   active: boolean;
   onNavigate?: () => void;
+  external?: boolean;
 }) {
+  if (external) {
+    return (
+      <a
+        href={href}
+        onClick={onNavigate}
+        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'rounded-full')}
+      >
+        {label}
+      </a>
+    );
+  }
+
   return (
     <Link
       to={href}
@@ -362,6 +383,7 @@ function HeaderBar() {
               href={item.href}
               label={item.label}
               active={activePath === item.href}
+              external={item.external}
             />
           ))}
         </nav>
@@ -423,6 +445,7 @@ function HeaderBar() {
                       label={item.label}
                       active={activePath === item.href}
                       onNavigate={() => setMobileOpen(false)}
+                      external={item.external}
                     />
                   ))}
                 </div>

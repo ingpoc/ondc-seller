@@ -2,6 +2,7 @@ import type { UCPOrder } from '@ondc-sdk/shared';
 import type { SellerOrderNote } from '@/types/agent';
 
 const LOCAL_ORDER_STORAGE_KEY = 'ondc-seller-demo-orders';
+const PORTFOLIO_ORDER_BRIDGE_KEY = 'ondc-portfolio-demo-orders';
 const LOCAL_ORDER_NOTE_STORAGE_KEY = 'ondc-seller-demo-order-notes';
 
 const DEFAULT_ORDERS: UCPOrder[] = [
@@ -12,7 +13,7 @@ const DEFAULT_ORDERS: UCPOrder[] = [
     updatedAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
     items: [
       {
-        id: 'demo-basmati-rice',
+        id: 'basmati-rice-5kg',
         name: 'Basmati Rice 5kg',
         quantity: 2,
         price: { currency: 'INR', value: '640.00' },
@@ -65,7 +66,7 @@ const DEFAULT_ORDERS: UCPOrder[] = [
     updatedAt: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
     items: [
       {
-        id: 'demo-cold-pressed-oil',
+        id: 'mustard-oil-1l',
         name: 'Cold Pressed Mustard Oil 1L',
         quantity: 3,
         price: { currency: 'INR', value: '285.00' },
@@ -135,24 +136,55 @@ function cloneDefaultOrders(): UCPOrder[] {
   }));
 }
 
+function readPortfolioBridgeOrders(): UCPOrder[] {
+  if (!canUseStorage()) {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(PORTFOLIO_ORDER_BRIDGE_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as UCPOrder[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function readOrders(): UCPOrder[] {
   if (!canUseStorage()) {
     return cloneDefaultOrders();
   }
 
   const raw = window.localStorage.getItem(LOCAL_ORDER_STORAGE_KEY);
+  let localOrders: UCPOrder[];
   if (!raw) {
-    const defaults = cloneDefaultOrders();
-    window.localStorage.setItem(LOCAL_ORDER_STORAGE_KEY, JSON.stringify(defaults));
-    return defaults;
+    localOrders = cloneDefaultOrders();
+    window.localStorage.setItem(LOCAL_ORDER_STORAGE_KEY, JSON.stringify(localOrders));
+  } else {
+    try {
+      const parsed = JSON.parse(raw);
+      localOrders = Array.isArray(parsed) ? (parsed as UCPOrder[]) : cloneDefaultOrders();
+    } catch {
+      localOrders = cloneDefaultOrders();
+    }
   }
 
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as UCPOrder[]) : cloneDefaultOrders();
-  } catch {
-    return cloneDefaultOrders();
+  const bridged = readPortfolioBridgeOrders();
+  if (!bridged.length) {
+    return localOrders;
   }
+
+  const byId = new Map<string, UCPOrder>();
+  for (const order of [...bridged, ...localOrders]) {
+    if (!byId.has(order.id)) {
+      byId.set(order.id, order);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function writeOrders(orders: UCPOrder[]) {

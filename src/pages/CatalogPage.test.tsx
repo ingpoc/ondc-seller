@@ -36,7 +36,7 @@ const catalogResponse = {
     {
       items: [
         {
-          id: 'demo-basmati-rice',
+          id: 'basmati-rice-5kg',
           descriptor: {
             name: 'Basmati Rice 5kg',
             short_desc: 'Premium rice listing used for local seller-flow fallback.',

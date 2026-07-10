@@ -35,7 +35,7 @@ vi.mock('../components', () => ({
   ProductForm: () => <div>product form</div>,
 }));
 
-function renderPage(route = '/catalog/demo-basmati-rice') {
+function renderPage(route = '/catalog/basmati-rice-5kg') {
   return render(
     <MemoryRouter initialEntries={[route]}>
       <Routes>

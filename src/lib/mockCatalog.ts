@@ -4,7 +4,7 @@ const LOCAL_DEMO_CATALOG_STORAGE_KEY = 'ondc-seller-demo-catalog';
 
 const DEFAULT_ITEMS: BecknItem[] = [
   {
-    id: 'demo-basmati-rice',
+    id: 'basmati-rice-5kg',
     name: 'Basmati Rice 5kg',
     description: 'Premium rice listing used for local seller-flow fallback.',
     descriptor: {
@@ -21,11 +21,11 @@ const DEFAULT_ITEMS: BecknItem[] = [
       },
     ],
     category: {
-      name: 'Staples',
+      name: 'grocery',
     },
   },
   {
-    id: 'demo-cold-pressed-oil',
+    id: 'mustard-oil-1l',
     name: 'Cold Pressed Mustard Oil 1L',
     description: 'Seller fallback catalog item for local trust validation.',
     descriptor: {
@@ -38,7 +38,7 @@ const DEFAULT_ITEMS: BecknItem[] = [
     },
     images: [],
     category: {
-      name: 'Pantry',
+      name: 'grocery',
     },
   },
 ];

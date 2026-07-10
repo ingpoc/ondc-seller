@@ -59,7 +59,7 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'draft_listing_update',
-            item_id: 'demo-cold-pressed-oil',
+            item_id: 'mustard-oil-1l',
             title: 'Cold Pressed Mustard Oil 1L',
             fields_to_review: {
               hero_image: 'MISSING - Add primary product image',
@@ -81,9 +81,9 @@ describe('agentSellerState', () => {
     expect(envelope?.actions).toHaveLength(2);
     expect(envelope?.actions[0]).toMatchObject({
       type: 'draft_listing_update',
-      target_item_id: 'demo-cold-pressed-oil',
+      target_item_id: 'mustard-oil-1l',
       draft: {
-        id: 'demo-cold-pressed-oil',
+        id: 'mustard-oil-1l',
         categoryId: 'Pantry',
         price: '285.00',
         currency: 'INR',
@@ -105,7 +105,7 @@ describe('agentSellerState', () => {
             actions: [
               {
                 type: 'catalog_patch',
-                item_id: 'demo-cold-pressed-oil',
+                item_id: 'mustard-oil-1l',
                 description: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
                 price: 'INR 299.00',
               },
@@ -123,7 +123,7 @@ describe('agentSellerState', () => {
     expect(envelope?.actions).toHaveLength(1);
     expect(envelope?.actions[0]).toMatchObject({
       type: 'catalog_patch',
-      target_item_id: 'demo-cold-pressed-oil',
+      target_item_id: 'mustard-oil-1l',
       patch: {
         description: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
         price: '299.00',
@@ -142,13 +142,13 @@ describe('agentSellerState', () => {
             actions: [
               {
                 type: 'catalog_patch',
-                item_id: 'demo-cold-pressed-oil',
+                item_id: 'mustard-oil-1l',
                 field: 'description',
                 value: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
               },
               {
                 type: 'catalog_patch',
-                item_id: 'demo-cold-pressed-oil',
+                item_id: 'mustard-oil-1l',
                 field: 'price',
                 value: 'INR 299.00',
               },
@@ -164,14 +164,14 @@ describe('agentSellerState', () => {
     expect(envelope?.actions).toHaveLength(2);
     expect(envelope?.actions[0]).toMatchObject({
       type: 'catalog_patch',
-      target_item_id: 'demo-cold-pressed-oil',
+      target_item_id: 'mustard-oil-1l',
       patch: {
         description: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
       },
     });
     expect(envelope?.actions[1]).toMatchObject({
       type: 'catalog_patch',
-      target_item_id: 'demo-cold-pressed-oil',
+      target_item_id: 'mustard-oil-1l',
       patch: {
         price: '299.00',
         currency: 'INR',
@@ -187,9 +187,9 @@ describe('agentSellerState', () => {
           {
             type: 'draft_listing_update',
             reason: 'Tighten the hero copy before publication.',
-            target_item_id: 'demo-basmati-rice',
+            target_item_id: 'basmati-rice-5kg',
             draft: {
-              id: 'demo-basmati-rice',
+              id: 'basmati-rice-5kg',
               name: 'Basmati Rice 5kg',
               description: 'Verified farm source with premium grain length.',
               price: '640.00',
@@ -209,7 +209,7 @@ describe('agentSellerState', () => {
     );
 
     expect(result.summary).toContain('Queued a draft');
-    expect(result.navigateTo).toBe('/catalog/demo-basmati-rice?draft=agent');
+    expect(result.navigateTo).toBe('/catalog/basmati-rice-5kg?draft=agent');
     expect(readSellerAgentDraft()?.draft.description).toContain('Verified farm source');
     expect(listSellerOrderNotesForOrder('seller-demo-1001')).toEqual([]);
     expect(result.auditEvents[0]).toMatchObject({
@@ -228,7 +228,7 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'catalog_patch',
-            target_item_id: 'demo-basmati-rice',
+            target_item_id: 'basmati-rice-5kg',
             reason: 'Improve conversion for a top listing',
             patch: {
               description: 'This should not be applied without verified trust.',
@@ -250,7 +250,7 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'catalog_patch',
-            target_item_id: 'demo-cold-pressed-oil',
+            target_item_id: 'mustard-oil-1l',
             reason: 'Tighten the live listing copy',
             patch: {
               description: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
@@ -265,7 +265,7 @@ describe('agentSellerState', () => {
     );
 
     expect(result.trustBlockReason).toBeNull();
-    const updated = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const updated = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
     expect(updated?.descriptor?.name).toBe('Cold Pressed Mustard Oil 1L');
     expect(updated?.descriptor?.short_desc).toBe(
       'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
@@ -275,7 +275,7 @@ describe('agentSellerState', () => {
   });
 
   it('stages verified agent writes until the seller explicitly approves them', () => {
-    const before = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const before = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
 
     const result = applySellerAgentEnvelope(
       {
@@ -283,7 +283,7 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'catalog_patch',
-            target_item_id: 'demo-cold-pressed-oil',
+            target_item_id: 'mustard-oil-1l',
             reason: 'Tighten the live listing copy',
             patch: {
               description: 'Pending approval description.',
@@ -303,13 +303,13 @@ describe('agentSellerState', () => {
       },
     );
 
-    const after = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const after = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
     expect(result.pendingApproval).toBe(true);
     expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
     expect(after?.price?.value).toBe(before?.price?.value);
     expect(result.auditEvents[0]).toMatchObject({
       action: 'catalog_patch',
-      target_id: 'demo-cold-pressed-oil',
+      target_id: 'mustard-oil-1l',
       wallet_address: 'seller-wallet-fixture',
       subject_id: 'seller-subject-fixture',
       session_id: 'seller-session-fixture',
@@ -325,13 +325,13 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'catalog_patch',
-            item_id: 'demo-cold-pressed-oil',
+            item_id: 'mustard-oil-1l',
             field: 'description',
             value: 'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
           },
           {
             type: 'catalog_patch',
-            item_id: 'demo-cold-pressed-oil',
+            item_id: 'mustard-oil-1l',
             field: 'price',
             value: 'INR 299.00',
           },
@@ -343,7 +343,7 @@ describe('agentSellerState', () => {
     const result = applySellerAgentEnvelope(envelope!, 'verified', { approved: true });
     expect(result.trustBlockReason).toBeNull();
 
-    const updated = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const updated = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
     expect(updated?.descriptor?.name).toBe('Cold Pressed Mustard Oil 1L');
     expect(updated?.descriptor?.short_desc).toBe(
       'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
@@ -354,7 +354,7 @@ describe('agentSellerState', () => {
   });
 
   it.each(TRUST_STATES)('applies catalog write trust policy for %s', (trustState) => {
-    const before = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const before = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
     expect(before).toBeTruthy();
 
     const result = applySellerAgentEnvelope(
@@ -363,7 +363,7 @@ describe('agentSellerState', () => {
         actions: [
           {
             type: 'catalog_patch',
-            target_item_id: 'demo-cold-pressed-oil',
+            target_item_id: 'mustard-oil-1l',
             reason: 'Trust matrix fixture.',
             patch: {
               description: `Updated description for ${trustState}.`,
@@ -376,7 +376,7 @@ describe('agentSellerState', () => {
       { approved: trustState === 'verified' },
     );
 
-    const after = getDemoCatalogItems().find((item) => item.id === 'demo-cold-pressed-oil');
+    const after = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
 
     if (trustState === 'verified') {
       expect(result.trustBlockReason).toBeNull();
@@ -384,7 +384,7 @@ describe('agentSellerState', () => {
       expect(after?.price?.value).toBe('333.00');
       expect(result.auditEvents[0]).toMatchObject({
         action: 'catalog_patch',
-        target_id: 'demo-cold-pressed-oil',
+        target_id: 'mustard-oil-1l',
         trust_state: 'verified',
         outcome: 'applied',
       });
@@ -396,7 +396,7 @@ describe('agentSellerState', () => {
     expect(after?.price?.value).toBe(before?.price?.value);
     expect(result.auditEvents[0]).toMatchObject({
       action: 'catalog_patch',
-      target_id: 'demo-cold-pressed-oil',
+      target_id: 'mustard-oil-1l',
       trust_state: trustState,
       outcome: 'blocked',
     });

@@ -6,6 +6,15 @@
 - This file adds only `ondc-seller`-specific execution guidance.
 - If this file conflicts with the root workspace `AGENTS.md`, the root file wins unless it explicitly allows a repo-local exception.
 
+## Browser Testing
+
+- BEFORE browser testing ONDC Seller -> read `../aadhaar-chain/qa/docs/workflow/browser-testing-control-plane.md`
+- BEFORE validating the same-user portfolio journey -> read `../aadhaar-chain/qa/docs/workflow/portfolio-browser-acceptance-loop.md`
+- Session friction / standing traps -> `../aadhaar-chain/qa/docs/workflow/session-friction-log.md`
+- Confirm AadhaarChain verified trust before seller write conclusions (catalog/order/config).
+- Critical browser routes: `/dashboard`, `/catalog`, `/catalog/new`, `/orders`, `/orders/:id`, `/config`, `/agent`
+- Local ledger mirror: `qa/test-ledger.json`. Prefer running graders from `aadhaar-chain/qa`.
+
 ONDC UCP Seller Portal - Private seller webapp
 
 ---

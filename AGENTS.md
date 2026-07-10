@@ -1,36 +1,33 @@
 # AGENTS.md
 
-## Instruction Inheritance
+## Scope
 
-- Read `../AGENTS.md` first for portfolio-wide governance.
-- This file adds only `ondc-seller`-specific execution guidance.
-- If this file conflicts with the root workspace `AGENTS.md`, the root file wins unless it explicitly allows a repo-local exception.
+Repo-local guidance for `ondc-seller` only.
 
-## Browser Testing
+**Portfolio QA / browser / same-wallet control owner:** `../aadhaar-chain/qa/docs/workflow/`  
+Entry: `../aadhaar-chain/qa/docs/workflow/README.md`
 
-- BEFORE browser testing ONDC Seller -> read `../aadhaar-chain/qa/docs/workflow/browser-testing-control-plane.md`
-- BEFORE validating the same-user portfolio journey -> read `../aadhaar-chain/qa/docs/workflow/portfolio-browser-acceptance-loop.md`
-- Session friction / standing traps -> `../aadhaar-chain/qa/docs/workflow/session-friction-log.md`
-- Confirm AadhaarChain verified trust before seller write conclusions (catalog/order/config).
-- Critical browser routes: `/dashboard`, `/catalog`, `/catalog/new`, `/orders`, `/orders/:id`, `/config`, `/agent`
-- Local ledger mirror: `qa/test-ledger.json`. Prefer running graders from `aadhaar-chain/qa`.
+There is no parent `../AGENTS.md` in this multi-repo checkout. Do not invent one. Do not fork the ledger or graders under this repo.
 
-ONDC UCP Seller Portal - Private seller webapp
+## Browser / portfolio testing (pointer only)
 
----
+- BEFORE browser testing → `../aadhaar-chain/qa/docs/workflow/browser-testing-control-plane.md`
+- BEFORE same-wallet journey → `../aadhaar-chain/qa/docs/workflow/portfolio-browser-acceptance-loop.md`
+- Session friction → `../aadhaar-chain/qa/docs/workflow/session-friction-log.md`
+- Confirm AadhaarChain verified trust before seller write conclusions (catalog/order/config)
+- Critical routes: `/dashboard`, `/catalog`, `/catalog/new`, `/orders`, `/orders/:id`, `/config`, `/agent`
+- Run graders only from `aadhaar-chain/qa`
 
 ## Repository Type
 
-**Private webapp** - Vite + React + TypeScript
-
----
+Private webapp — Vite + React + TypeScript. Dev port **43103** (not 3002).
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
 | `pnpm install` | Install dependencies |
-| `pnpm dev` | Start dev server (port 3002) |
+| `pnpm dev` | Start dev server (port 43103) |
 | `pnpm build` | Production build |
 | `pnpm preview` | Preview production build |
 | `pnpm test` | Run tests |
@@ -40,16 +37,11 @@ ONDC UCP Seller Portal - Private seller webapp
 | `pnpm lint` | Run ESLint |
 | `pnpm format` | Format with Prettier |
 
----
-
 ## Development
 
 1. `pnpm install` → `pnpm dev`
-2. Open `http://localhost:3002`
-3. Hot reload enabled
-4. Source maps for debugging
-
----
+2. Open `http://127.0.0.1:43103`
+3. Trust client: vendored at `./shared/trust-client` (aliases must point here, not missing `../shared/...`)
 
 ## Tech Stack
 
@@ -58,51 +50,7 @@ ONDC UCP Seller Portal - Private seller webapp
 | Framework | React 18 + Vite |
 | Language | TypeScript |
 | Routing | React Router v6 |
-| SDK | `@ondc-sdk/shared` |
 | Testing | Vitest + jsdom |
-
----
-
-## Testing
-
-- Framework: Vitest + @testing-library/react
-- Test files: `src/**/*.test.ts`, `src/**/*.test.tsx`
-- Setup: `src/__tests__/setup.ts`
-- Run: `pnpm test` or `pnpm test:watch`
-
----
-
-## Structure
-
-```
-src/
-├── components/      # React components
-├── pages/           # Page components
-├── hooks/           # Custom hooks
-├── services/        # API calls
-├── types/           # TypeScript types
-├── __tests__/       # Test setup
-└── main.tsx         # Entry point
-```
-
----
-
-## Key Dependencies
-
-- `@ondc-sdk/shared` - ONDC SDK utilities
-- `react-router-dom` - Routing
-- `@drams-design/components` - UI components (optional)
-
----
-
-## Before Changing
-
-1. Check `src/pages/` for route definitions
-2. Read `src/services/` for API patterns
-3. Run `pnpm typecheck` before committing
-4. Test user flows, not just components
-
----
 
 ## Seller-Specific Features
 
@@ -111,76 +59,13 @@ src/
 - Inventory tracking
 - Store configuration
 
----
+## Before Changing
+
+1. Check `src/pages/` for route definitions
+2. Read `src/services/` for API patterns
+3. Run `pnpm typecheck` before committing
+4. Test user flows, not just components
 
 ## CI/CD
 
-- CI runs on all PRs and main branch
-- Checks: typecheck, build, test
-- No publishing (private repo)
-
----
-
-## GitHub Actions (Agents: Create if Missing)
-
-### Existing Workflows
-
-- `.github/workflows/ci.yml` - CI testing
-
-### Additional Workflows to Create
-
-#### 1. Lint Workflow (`.github/workflows/lint.yml`)
-
-```yaml
-name: Lint
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm format:check
-```
-
-#### 2. Deploy Preview Workflow (`.github/workflows/preview.yml`)
-
-```yaml
-name: Deploy Preview
-
-on:
-  pull_request:
-    branches: [main]
-
-jobs:
-  preview:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Upload preview
-        uses: actions/upload-artifact@v4
-        with:
-          name: preview-build
-          path: dist/
-```
+CI on PRs/main: typecheck, build, test. No publishing.

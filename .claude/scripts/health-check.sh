@@ -4,7 +4,7 @@
 # Purpose: Fast health diagnosis for React + Vite development
 #
 # CUSTOMIZED FOR:
-# - Vite dev server on port 3002
+# - Vite dev server on port 43103
 # - Vitest for testing
 # - No backend (API calls proxied to external service)
 #
@@ -15,7 +15,7 @@
 
 set -e
 
-FRONTEND_PORT=3002
+FRONTEND_PORT=43103
 ISSUES_FOUND=0
 
 echo "=== Health Check ==="
@@ -103,7 +103,7 @@ check_service() {
   return 1
 }
 
-if ! check_service "http://localhost:$FRONTEND_PORT" "Vite Dev Server" "vite"; then
+if ! check_service "http://127.0.0.1:$FRONTEND_PORT" "Vite Dev Server" "vite"; then
   echo "" >&2
   echo "❌ Health check FAILED" >&2
   exit 1

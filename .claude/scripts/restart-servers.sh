@@ -4,14 +4,14 @@
 # Purpose: Restart Vite dev server
 #
 # CUSTOMIZED FOR:
-# - Vite dev server on port 3002
+# - Vite dev server on port 43103
 # - No backend (API calls proxied)
 #
 # Usage: ./restart-servers.sh
 
 set -e
 
-FRONTEND_PORT=3002
+FRONTEND_PORT=43103
 
 echo "=== Restarting Vite Dev Server ==="
 
@@ -58,7 +58,7 @@ max_wait=15
 count=0
 
 while [ $count -lt $max_wait ]; do
-  if curl -sf "http://localhost:$FRONTEND_PORT" > /dev/null 2>&1; then
+  if curl -sf "http://127.0.0.1:$FRONTEND_PORT" > /dev/null 2>&1; then
     echo "✓ Vite dev server is ready"
     break
   fi
@@ -80,7 +80,7 @@ fi
 
 echo ""
 echo "=== Server restarted successfully ==="
-echo "URL:  http://localhost:$FRONTEND_PORT"
+echo "URL:  http://127.0.0.1:$FRONTEND_PORT"
 echo "Logs: logs/vite.log"
 
 exit 0

@@ -53,7 +53,7 @@ export function CatalogPage() {
   const query = (searchParams.get('q') ?? '').trim().toLowerCase();
   const { publicKey } = useWallet();
   const { subjectId, walletAddress } = useSubject();
-  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const trust = useTrustState(walletAddress);
   const { data, loading, error, execute } = useApi('/api/catalog');
   const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
 

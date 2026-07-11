@@ -329,3 +329,23 @@ export function dispatchDemoSellerOrder(orderId: string, trackingId: string) {
       : order.fulfillment,
   }));
 }
+
+export function refundDemoSellerOrder(orderId: string, amountInr: number, receiptId: string) {
+  return updateOrder(orderId, (order) => ({
+    ...order,
+    updatedAt: new Date().toISOString(),
+    cancellation: {
+      cancelledAt: new Date().toISOString(),
+      cancelledBy: 'seller',
+      reason: `AgentGuard refund INR ${amountInr} (receipt ${receiptId})`,
+      refundedAmount: amountInr,
+      refund: {
+        amount: amountInr,
+        currency: 'INR',
+        receiptId,
+        status: 'completed',
+      },
+    },
+    status: order.status === 'delivered' || order.status === 'shipped' ? order.status : 'cancelled',
+  }));
+}

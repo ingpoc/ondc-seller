@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useWallet } from '@solana/wallet-adapter-react';
 import {
   AsyncState,
   Badge,
@@ -11,7 +10,7 @@ import {
   StatCard,
 } from '@/components/seller-ui';
 import { useApi } from '../hooks/useApi';
-import { createSignedIdentityProof } from '../lib/trust';
+import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
 
@@ -27,11 +26,9 @@ interface SellerCatalogItem {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { publicKey, signMessage } = useWallet();
-  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const { walletAddress } = useSubject();
+  const trust = useTrustState(walletAddress);
   const { data, loading, error, execute } = useApi('/api/catalog');
-  const [proofState, setProofState] = useState<'idle' | 'signing' | 'verified' | 'error'>('idle');
-  const [proofMessage, setProofMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void execute();
@@ -43,44 +40,18 @@ export function DashboardPage() {
   );
   const itemCount = items.length;
   const categoryCount = new Set(items.map((item) => item.category_id ?? 'uncategorized')).size;
-  const richListingCount = items.filter((item) => item.descriptor?.short_desc).length;
   const trustLabel = trust.loading
     ? 'Checking'
     : trust.state === 'verified'
       ? 'Verified'
       : 'Needs action';
 
-  async function handleProveSellerIdentity(): Promise<void> {
-    const walletAddress = publicKey?.toBase58();
-    if (!walletAddress || !signMessage) {
-      setProofState('error');
-      setProofMessage('Wallet message signing is not available for this account.');
-      return;
-    }
-
-    setProofState('signing');
-    setProofMessage(null);
-    try {
-      const result = await createSignedIdentityProof({
-        walletAddress,
-        audience: 'seller',
-        purpose: 'seller_catalog_identity_proof',
-        signMessage,
-      });
-      setProofState(result.valid ? 'verified' : 'error');
-      setProofMessage(result.reason);
-    } catch (err) {
-      setProofState('error');
-      setProofMessage(err instanceof Error ? err.message : 'Seller identity proof failed.');
-    }
-  }
-
   return (
     <PageLayout>
       <Section
-        eyebrow="Seller cockpit"
-        title="Keep the storefront ready for verified buyers"
-        description="Track trust readiness, catalog depth, and the next operational move from one shared shell."
+        eyebrow="Seller"
+        title="Catalog and trust"
+        description="Publish listings when verified. Open catalog to manage the full shelf."
         actions={
           <div className="flex flex-wrap gap-3">
             <Button
@@ -105,170 +76,88 @@ export function DashboardPage() {
           />
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3">
+          <StatCard label="Products" value={itemCount} hint="Live listings in the demo catalog" />
           <StatCard
-            label="Products live"
-            value={itemCount}
-            hint={
-              itemCount > 0
-                ? `${richListingCount} listings already include buyer-facing context`
-                : 'Publish your first SKU to activate the seller shelf'
-            }
-          />
-          <StatCard
-            label="Catalog spread"
+            label="Categories"
             value={categoryCount}
-            hint={categoryCount > 1 ? 'Coverage spans multiple demand lanes' : 'Still concentrated in one lane'}
+            hint={categoryCount > 1 ? 'Multiple demand lanes' : 'Single category so far'}
             tone="info"
           />
           <StatCard
-            label="Trust state"
+            label="Trust"
             value={trustLabel}
-            hint={trust.reason ?? 'Verification keeps elevated seller actions available'}
+            hint={trust.reason ?? 'Required for elevated publish actions'}
             tone={trust.state === 'verified' ? 'success' : 'warning'}
           />
-          <StatCard
-            label="Pending orders"
-            value={0}
-            hint="Order intake stays quiet until live buyer traffic arrives"
-          />
         </div>
-
-        <Card className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-2">
-              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-                Seller proof
-              </div>
-              <h2 className="text-xl font-bold text-[var(--ui-text)]">
-                {proofState === 'verified' ? 'Identity signed' : 'Sign seller proof'}
-              </h2>
-              <p className="max-w-3xl text-sm text-[var(--ui-text-secondary)]">
-                Sign a short-lived AadhaarChain proof before high-trust catalog and order actions.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={trust.loading || trust.state !== 'verified' || proofState === 'signing'}
-              onClick={() => void handleProveSellerIdentity()}
-            >
-              {proofState === 'signing' ? 'Awaiting signature' : 'Sign seller proof'}
-            </Button>
-          </div>
-          {proofMessage ? (
-            <div className="rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-[var(--ui-bg-subtle)] px-4 py-3 text-sm text-[var(--ui-text-secondary)]">
-              {proofMessage}
-            </div>
-          ) : null}
-        </Card>
       </Section>
 
-      <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <Card className="space-y-5">
-          <div className="space-y-2">
-            <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-              Catalog pulse
-            </div>
-            <h2 className="text-2xl font-bold tracking-[-0.03em] text-[var(--ui-text)]">
-              Recent inventory snapshot
-            </h2>
-            <p className="text-sm text-[var(--ui-text-secondary)]">
-              Use this short list to confirm your most visible products still read clearly before
-              you dive into the full table.
-            </p>
+      <Card className="mt-10 space-y-5">
+        <div className="space-y-2">
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
+            Recent products
           </div>
+          <h2 className="text-2xl font-bold tracking-[-0.03em] text-[var(--ui-text)]">
+            Inventory snapshot
+          </h2>
+        </div>
 
-          {loading && !data ? (
-            <AsyncState
-              kind="loading"
-              title="Loading catalog"
-              description="Pulling the latest seller inventory into the dashboard."
-            />
-          ) : error ? (
-            <AsyncState
-              kind="error"
-              title="Catalog unavailable"
-              description={error}
-              action={
-                <Button type="button" variant="secondary" onClick={() => void execute()}>
-                  Retry
-                </Button>
-              }
-            />
-          ) : itemCount === 0 ? (
-            <AsyncState
-              kind="empty"
-              title="No products yet"
-              description="Create a first product card so buyers can discover your storefront."
-              action={
-                <Button
-                  type="button"
-                  onClick={() => navigate('/catalog/new')}
-                  disabled={!trust.loading && trust.state !== 'verified'}
-                >
-                  Add first product
-                </Button>
-              }
-            />
-          ) : (
-            <div className="space-y-3">
-              {items.slice(0, 3).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => navigate(`/catalog/${item.id}`)}
-                  className="flex w-full items-start justify-between gap-4 rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-sm)]"
-                >
-                  <div className="space-y-2">
-                    <div className="text-base font-semibold text-[var(--ui-text)]">
-                      {item.descriptor?.name ?? 'Untitled product'}
-                    </div>
-                    <div className="text-sm text-[var(--ui-text-secondary)]">
-                      {item.descriptor?.short_desc ?? 'Add a short descriptor to improve buyer scanability.'}
-                    </div>
-                  </div>
-                  <Badge tone="info">{item.category_id ?? 'general'}</Badge>
-                </button>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card className="space-y-5">
-          <div className="space-y-2">
-            <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-              Operating focus
-            </div>
-            <h2 className="text-2xl font-bold tracking-[-0.03em] text-[var(--ui-text)]">
-              What to tighten next
-            </h2>
-          </div>
-
+        {loading && !data ? (
+          <AsyncState
+            kind="loading"
+            title="Loading catalog"
+            description="Pulling the latest seller inventory."
+          />
+        ) : error ? (
+          <AsyncState
+            kind="error"
+            title="Catalog unavailable"
+            description={error}
+            action={
+              <Button type="button" variant="secondary" onClick={() => void execute()}>
+                Retry
+              </Button>
+            }
+          />
+        ) : itemCount === 0 ? (
+          <AsyncState
+            kind="empty"
+            title="No products yet"
+            description="Create a first product so buyers can discover your storefront."
+            action={
+              <Button
+                type="button"
+                onClick={() => navigate('/catalog/new')}
+                disabled={!trust.loading && trust.state !== 'verified'}
+              >
+                Add first product
+              </Button>
+            }
+          />
+        ) : (
           <div className="space-y-3">
-            <div className="rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-[var(--ui-bg-subtle)] px-4 py-4">
-              <div className="text-sm font-semibold text-[var(--ui-text)]">Trust verification</div>
-              <div className="mt-1 text-sm text-[var(--ui-text-secondary)]">
-                Verified sellers can publish and edit high-trust catalog actions without runtime
-                blocks.
-              </div>
-            </div>
-            <div className="rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-[var(--ui-bg-subtle)] px-4 py-4">
-              <div className="text-sm font-semibold text-[var(--ui-text)]">Listing clarity</div>
-              <div className="mt-1 text-sm text-[var(--ui-text-secondary)]">
-                Add concise descriptions and imagery so discovery results read well in buyer cards.
-              </div>
-            </div>
-            <div className="rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-[var(--ui-bg-subtle)] px-4 py-4">
-              <div className="text-sm font-semibold text-[var(--ui-text)]">Order readiness</div>
-              <div className="mt-1 text-sm text-[var(--ui-text-secondary)]">
-                Keep the catalog tidy now so order-management flows can layer in without cleanup
-                debt later.
-              </div>
-            </div>
+            {items.slice(0, 5).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => navigate(`/catalog/${item.id}`)}
+                className="flex w-full items-start justify-between gap-4 rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-sm)]"
+              >
+                <div className="min-w-0 space-y-2">
+                  <div className="truncate text-base font-semibold text-[var(--ui-text)]">
+                    {item.descriptor?.name ?? 'Untitled product'}
+                  </div>
+                  <div className="line-clamp-2 text-sm text-[var(--ui-text-secondary)]">
+                    {item.descriptor?.short_desc ?? 'Add a short descriptor for buyer cards.'}
+                  </div>
+                </div>
+                <Badge tone="info">{item.category_id ?? 'general'}</Badge>
+              </button>
+            ))}
           </div>
-        </Card>
-      </div>
+        )}
+      </Card>
     </PageLayout>
   );
 }

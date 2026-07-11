@@ -22,8 +22,16 @@ import {
   dispatchDemoSellerOrder,
   getDemoSellerOrder,
   listSellerOrderNotesForOrder,
+  refundDemoSellerOrder,
   rejectDemoSellerOrder,
 } from '../lib/localSellerOrders';
+import {
+  consumeApproval,
+  evaluateRefund,
+  type AgentGuardApproval,
+  type AgentGuardReceipt,
+} from '../lib/agentGuardClient';
+import { createSignedIdentityProof } from '../lib/trust';
 
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
@@ -134,13 +142,17 @@ function formatDate(value?: string) {
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { publicKey } = useWallet();
+  const { signMessage } = useWallet();
   const { subjectId, walletAddress } = useSubject();
-  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const trust = useTrustState(walletAddress);
   const [order, setOrder] = useState<UCPOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<AgentGuardApproval | null>(null);
+  const [lastApprovalId, setLastApprovalId] = useState<string | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<AgentGuardReceipt | null>(null);
+  const [agentGuardMessage, setAgentGuardMessage] = useState<string | null>(null);
   const orderNotes = order ? listSellerOrderNotesForOrder(order.id) : [];
 
   useEffect(() => {
@@ -378,6 +390,114 @@ export function OrderDetailPage() {
     }
   }
 
+  async function applyAllowedRefund(amountInr: number, receipt: AgentGuardReceipt) {
+    if (!id) return;
+    if (COMMERCE_DEMO_MODE) {
+      const next = refundDemoSellerOrder(id, amountInr, receipt.receipt_id);
+      if (!next) throw new Error('Order not found');
+      setOrder(next);
+    }
+    setLastReceipt(receipt);
+    setPendingApproval(null);
+    setAgentGuardMessage(
+      `Refund INR ${amountInr} allowed. Receipt ${receipt.receipt_id} (no identity data).`,
+    );
+  }
+
+  async function handleAgentGuardRefund(amountInr: number) {
+    if (!order || !id) return;
+    if (!walletAddress) {
+      setError('Connect and sign in with AadhaarChain before AgentGuard refunds.');
+      return;
+    }
+    if (trust.state !== 'verified') {
+      setError('Verified seller trust is required for AgentGuard refunds.');
+      return;
+    }
+    setProcessing(`refund-${amountInr}`);
+    setError(null);
+    setAgentGuardMessage(null);
+    try {
+      const result = await evaluateRefund({
+        walletAddress,
+        amountInr,
+        resourceId: id,
+      });
+      if (result.decision === 'allow' && result.receipt) {
+        await applyAllowedRefund(amountInr, result.receipt);
+        return;
+      }
+      if (result.decision === 'need_approval' && result.approval) {
+        setPendingApproval(result.approval);
+        setLastApprovalId(result.approval.approval_id);
+        setAgentGuardMessage(result.reason);
+        return;
+      }
+      setPendingApproval(null);
+      setAgentGuardMessage(result.reason || 'Refund denied.');
+      if (result.receipt) setLastReceipt(result.receipt);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'AgentGuard refund failed');
+    } finally {
+      setProcessing(null);
+    }
+  }
+
+  async function handleApproveOnce() {
+    if (!pendingApproval || !walletAddress) {
+      setError('No pending approval.');
+      return;
+    }
+    setProcessing('approve');
+    setError(null);
+    try {
+      // Demo/Hermes: skip wallet popup; consume is the one-time authority gate.
+      if (!COMMERCE_DEMO_MODE && signMessage) {
+        await createSignedIdentityProof({
+          walletAddress,
+          audience: 'ondcseller',
+          purpose: 'seller_refund_approval',
+          signMessage,
+        });
+      } else if (!COMMERCE_DEMO_MODE && !signMessage) {
+        setError('Wallet signMessage is required to approve once.');
+        return;
+      }
+      const consumed = await consumeApproval({
+        walletAddress,
+        approvalId: pendingApproval.approval_id,
+      });
+      await applyAllowedRefund(pendingApproval.amount_inr, consumed.receipt);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Approval failed');
+    } finally {
+      setProcessing(null);
+    }
+  }
+
+  async function handleReplayApproval() {
+    const approvalId = lastApprovalId || pendingApproval?.approval_id;
+    if (!approvalId || !walletAddress) {
+      setError('No approval to replay.');
+      return;
+    }
+    setProcessing('replay');
+    setError(null);
+    try {
+      await consumeApproval({
+        walletAddress,
+        approvalId,
+      });
+      setAgentGuardMessage('Unexpected: replay succeeded');
+    } catch (err) {
+      setAgentGuardMessage(
+        err instanceof Error ? err.message : 'Approval already consumed (replay rejected).',
+      );
+    } finally {
+      setProcessing(null);
+    }
+  }
+
   const timeline = useMemo(() => (order ? getOrderTimeline(order) : []), [order]);
 
   if (loading) {
@@ -475,6 +595,67 @@ export function OrderDetailPage() {
           </Button>
         ) : null}
       </div>
+
+      <Card data-testid="agentguard-refund-panel">
+        <CardHeader>
+          <CardTitle>AgentGuard refunds</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Demo: INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR
+            5,000.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              data-testid="refund-3000"
+              disabled={!!processing || trust.loading || !walletAddress}
+              onClick={() => void handleAgentGuardRefund(3000)}
+            >
+              {processing === 'refund-3000' ? 'Processing…' : 'Refund INR 3,000'}
+            </Button>
+            <Button
+              data-testid="refund-7500"
+              variant="outline"
+              disabled={!!processing || trust.loading || !walletAddress}
+              onClick={() => void handleAgentGuardRefund(7500)}
+            >
+              {processing === 'refund-7500' ? 'Processing…' : 'Refund INR 7,500'}
+            </Button>
+          </div>
+          {agentGuardMessage ? (
+            <p className="text-sm text-foreground" data-testid="agentguard-message">
+              {agentGuardMessage}
+            </p>
+          ) : null}
+          {pendingApproval || lastApprovalId ? (
+            <div className="flex flex-wrap gap-2" data-testid="agentguard-approval">
+              {pendingApproval ? (
+                <Button
+                  data-testid="approve-once"
+                  disabled={!!processing || (!COMMERCE_DEMO_MODE && !signMessage)}
+                  onClick={() => void handleApproveOnce()}
+                >
+                  {processing === 'approve' ? 'Approving…' : 'Approve once'}
+                </Button>
+              ) : null}
+              <Button
+                data-testid="replay-approval"
+                variant="destructive"
+                disabled={!!processing}
+                onClick={() => void handleReplayApproval()}
+              >
+                {processing === 'replay' ? 'Replaying…' : 'Replay approval'}
+              </Button>
+            </div>
+          ) : null}
+          {lastReceipt ? (
+            <p className="text-sm text-muted-foreground" data-testid="agentguard-last-receipt">
+              Last receipt: {lastReceipt.receipt_id} · {lastReceipt.outcome} · INR{' '}
+              {lastReceipt.amount_inr}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {order.cancellation ? (
         <Card className="border-destructive/20 bg-destructive/5">

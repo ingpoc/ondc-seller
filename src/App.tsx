@@ -9,6 +9,7 @@ import { ProductEditPage } from './pages/ProductEditPage';
 import { AgentChatPage } from './pages/AgentChatPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
+import { AgentGuardPage } from './pages/AgentGuardPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { Button, buttonVariants } from './components/ui/button';
 import { ButtonGroup, ButtonGroupText } from './components/ui/button-group';
@@ -29,6 +30,9 @@ import {
 import { normalizeLoopbackUrl } from './lib/loopback';
 import type { PortfolioTrustState } from './lib/trust';
 import { cn } from './lib/utils';
+import { useAuthContext } from './contexts/AuthContext';
+
+const IDENTITY_AUTH_ENABLED = import.meta.env.VITE_IDENTITY_AUTH_ENABLED === 'true';
 
 type NavItem = {
   href: string;
@@ -41,8 +45,12 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/catalog', label: 'Catalog' },
   { href: '/orders', label: 'Orders' },
   { href: '/config', label: 'Config' },
+];
+
+const SECONDARY_NAV_ITEMS: NavItem[] = [
+  { href: '/agentguard', label: 'AgentGuard' },
   { href: '/agent', label: 'Agent' },
-  { href: '/usecase.html#agents', label: 'Use Case', external: true },
+  { href: '/usecase.html#agents', label: 'How it works', external: true },
 ];
 
 const IDENTITY_WEB_URL = normalizeLoopbackUrl(
@@ -335,6 +343,7 @@ function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { walletAddress, subjectId } = useSubject();
+  const { isAuthenticated, loading: authLoading, login, logout } = useAuthContext();
   const trust = useTrustState(walletAddress);
   const runtime = useAgentRuntime(subjectId, walletAddress);
   const [activeControl, setActiveControl] = useState<HeaderControl>(null);
@@ -411,17 +420,62 @@ function HeaderBar() {
             icon={trustMeta.icon}
             label={`Trust ${trustMeta.label}`}
             detail={trustMeta.detail}
-            href={`${IDENTITY_WEB_URL}/dashboard`}
+            href={`${IDENTITY_WEB_URL}/home`}
             expanded={activeControl === 'trust'}
             onExpand={() => setActiveControl('trust')}
             className={trustMeta.className}
             ariaLabel="Open trust status"
           />
 
+          {IDENTITY_AUTH_ENABLED && !authLoading ? (
+            isAuthenticated ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={() => void logout()}
+              >
+                Sign out
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                className="rounded-full"
+                onClick={() => login(location.pathname)}
+              >
+                Login with AadhaarChain
+              </Button>
+            )
+          ) : null}
+
           <WalletMultiButton style={WALLET_BUTTON_STYLE} />
         </div>
 
         <div className="ml-auto flex items-center gap-2 lg:hidden">
+          {IDENTITY_AUTH_ENABLED && !authLoading ? (
+            isAuthenticated ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={() => void logout()}
+              >
+                Sign out
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                className="rounded-full"
+                onClick={() => login(location.pathname)}
+              >
+                Login
+              </Button>
+            )
+          ) : null}
           <WalletMultiButton style={WALLET_BUTTON_STYLE} />
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
@@ -450,6 +504,19 @@ function HeaderBar() {
                   ))}
                 </div>
 
+                <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
+                  {SECONDARY_NAV_ITEMS.map((item) => (
+                    <NavigationLink
+                      key={item.href}
+                      href={item.href}
+                      label={item.label}
+                      active={activePath === item.href}
+                      onNavigate={() => setMobileOpen(false)}
+                      external={item.external}
+                    />
+                  ))}
+                </div>
+
                 <HeaderSearch onSearch={(query) => {
                   handleSearch(query);
                   setMobileOpen(false);
@@ -461,7 +528,7 @@ function HeaderBar() {
                     <span>Runtime {runtimeMeta.label}</span>
                   </div>
                   <a
-                    href={`${IDENTITY_WEB_URL}/dashboard`}
+                    href={`${IDENTITY_WEB_URL}/home`}
                     className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', trustMeta.className)}
                   >
                     <TrustIcon className="size-4" />
@@ -478,23 +545,38 @@ function HeaderBar() {
 }
 
 export function App() {
+  const location = useLocation();
+  const activePath = getActivePath(location.pathname);
+
   return (
     <div className="min-h-screen">
       <HeaderBar />
       <main className="pb-10">
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/catalog/new" element={<ProductEditPage />} />
           <Route path="/catalog/:id" element={<ProductEditPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id" element={<OrderDetailPage />} />
+          <Route path="/agentguard" element={<AgentGuardPage />} />
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/agent" element={<AgentChatPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
+      <footer className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 border-t border-border/60 px-4 py-6 text-sm text-muted-foreground sm:px-6 lg:px-8">
+        {SECONDARY_NAV_ITEMS.map((item) => (
+          <NavigationLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            active={activePath === item.href}
+            external={item.external}
+          />
+        ))}
+      </footer>
     </div>
   );
 }

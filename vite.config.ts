@@ -22,8 +22,8 @@ export default defineConfig({
     strictPort: true,
     port: 43103,
     proxy: {
-      '/api/entitlements': 'http://localhost:8100',
-      '/api/agent': 'http://localhost:8100',
+      '/api/entitlements': 'http://127.0.0.1:43104',
+      '/api/agent': 'http://127.0.0.1:43104',
       '/api': 'http://localhost:3001',
       '/on_search': 'http://localhost:3001',
     },

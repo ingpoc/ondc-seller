@@ -10,7 +10,7 @@ It does not verify identity documents and it does not operate the AadhaarChain t
 | --- | --- |
 | Seller frontend | `http://127.0.0.1:43103` |
 | AadhaarChain gateway | `http://127.0.0.1:43101` |
-| Agent control plane | `http://127.0.0.1:8100` |
+| Agent control plane (FlatWatch) | `http://127.0.0.1:43104` |
 
 ## Environment
 
@@ -18,7 +18,7 @@ It does not verify identity documents and it does not operate the AadhaarChain t
 VITE_API_BASE_URL=http://localhost:3001
 VITE_IDENTITY_URL=http://127.0.0.1:43101
 VITE_TRUST_API_URL=http://127.0.0.1:43101
-VITE_AGENT_CONTROL_PLANE_URL=http://127.0.0.1:8100
+VITE_AGENT_CONTROL_PLANE_URL=http://127.0.0.1:43104
 VITE_COMMERCE_DEMO_MODE=true
 ```
 

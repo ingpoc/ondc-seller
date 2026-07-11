@@ -33,7 +33,7 @@ export function ProductEditPage() {
   const [searchParams] = useSearchParams();
   const isNew = !id;
   const shouldUseAgentDraft = searchParams.get('draft') === 'agent';
-  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const trust = useTrustState(walletAddress);
   const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
 
   const { data: existingProduct, execute } = useApi<BecknItem>(

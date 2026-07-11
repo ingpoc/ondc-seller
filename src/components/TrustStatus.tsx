@@ -74,7 +74,7 @@ export function TrustStatusChip({
   const Icon = meta.icon;
 
   return (
-    <a href={`${IDENTITY_WEB_URL}/dashboard`} className="inline-flex">
+    <a href={`${IDENTITY_WEB_URL}/home`} className="inline-flex">
       <Badge className={meta.className}>
         <Icon className="size-3.5" />
         {loading ? 'Trust loading' : `Trust ${meta.label}`}
@@ -120,7 +120,7 @@ export function TrustNotice({
 
         <div>
           <Button asChild variant={state === 'verified' ? 'secondary' : 'default'}>
-            <a href={`${IDENTITY_WEB_URL}/dashboard`}>{actionLabel}</a>
+            <a href={`${IDENTITY_WEB_URL}/home`}>{actionLabel}</a>
           </Button>
         </div>
       </CardContent>

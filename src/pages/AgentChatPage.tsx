@@ -540,7 +540,7 @@ export function AgentChatPage(): JSX.Element {
     <PageLayout>
       <PageHeader
         title="Seller Agent Operations Cockpit"
-        subtitle="Run catalog review, draft listing updates, and seller ops triage from a trust-aware Claude control surface."
+        subtitle="Run catalog review, draft listing updates, and seller ops triage from a trust-aware Cursor control surface."
       />
       <div className="space-y-6">
         <div className="flex flex-wrap gap-2">
@@ -565,10 +565,10 @@ export function AgentChatPage(): JSX.Element {
         {subjectId && !runtime.runtime_available ? (
           <Alert
             tone="warning"
-            title="Claude runtime unavailable"
+            title="Cursor runtime unavailable"
             description={
               runtime.blocked_reason ??
-              'Configure supported Claude Agent SDK auth or use the local Claude CLI dev adapter on localhost.'
+              'Set CURSOR_API_KEY on the FlatWatch backend (:43104) and restart the dev stack.'
             }
           />
         ) : null}

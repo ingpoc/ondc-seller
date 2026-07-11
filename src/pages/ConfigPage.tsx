@@ -70,7 +70,7 @@ function createDemoPrivateKey(): string {
 export function ConfigPage() {
   const { publicKey } = useWallet();
   const { subjectId, walletAddress } = useSubject();
-  const trust = useTrustState(publicKey?.toBase58() ?? null);
+  const trust = useTrustState(walletAddress);
   const [config, setConfig] = useState<SellerClientConfig>(INITIAL_CONFIG);
   const [errors, setErrors] = useState<ConfigError[]>([]);
   const [loading, setLoading] = useState(false);

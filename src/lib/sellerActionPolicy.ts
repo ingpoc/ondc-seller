@@ -1,4 +1,4 @@
-import type { PortfolioTrustState } from './trust';
+import { sessionSkipsLegacyTrust, type PortfolioTrustState } from './trust';
 
 export type SellerSensitiveAction =
   | 'catalog_save'
@@ -38,7 +38,8 @@ export interface SellerBackendActionPolicy {
   enforcement: 'backend_must_revalidate_trust';
 }
 
-const VERIFIED_TRUST_REQUIRED = 'Verified seller trust is required before this seller action can execute.';
+const VERIFIED_TRUST_REQUIRED =
+  'Sign in or verified trust is required before this seller action can execute.';
 
 export const SELLER_ACTION_POLICY: Record<
   SellerSensitiveAction,
@@ -90,7 +91,9 @@ export function evaluateSellerActionPolicy(
   context: SellerActionContext,
 ): SellerActionPolicyDecision {
   const policy = SELLER_ACTION_POLICY[action];
-  const allowed = context.trustState === policy.requiredTrustState;
+  const allowed =
+    context.trustState === policy.requiredTrustState ||
+    sessionSkipsLegacyTrust(context.subjectId);
 
   return {
     allowed,
@@ -122,7 +125,8 @@ export function buildSellerBackendActionPolicy(
 ): SellerBackendActionPolicy {
   assertSellerActionAllowed(action, context);
 
-  if (!context.walletAddress) {
+  const sessionPrincipal = sessionSkipsLegacyTrust(context.subjectId);
+  if (!context.walletAddress && !sessionPrincipal) {
     throw new Error('Wallet address is required before protected seller actions can be sent.');
   }
 
@@ -130,15 +134,17 @@ export function buildSellerBackendActionPolicy(
     throw new Error('Audit subject is required before protected seller actions can be sent.');
   }
 
+  const walletOrSubject = context.walletAddress ?? context.subjectId ?? '';
+
   return {
     action,
     required_trust_state: 'verified',
-    wallet_address: context.walletAddress,
+    wallet_address: walletOrSubject,
     subject_id: context.subjectId ?? null,
     session_id: context.sessionId ?? null,
     audit_subject_id: context.auditSubjectId,
     audit_reference_id: context.auditReferenceId ?? null,
-    client_observed_trust_state: context.trustState,
+    client_observed_trust_state: sessionPrincipal ? 'verified' : context.trustState,
     enforcement: 'backend_must_revalidate_trust',
   };
 }

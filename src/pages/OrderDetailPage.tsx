@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { TrustNotice } from '@/components/TrustStatus';
 import { useSubject, useTrustState } from '@/hooks';
-import type { PortfolioTrustState } from '@/lib/trust';
+import { effectiveElevatedTrustState, type PortfolioTrustState } from '@/lib/trust';
 import { recordSellerActionAuditEvent } from '@/lib/localSellerAudit';
 import {
   buildSellerActionHeaders,
@@ -16,7 +16,7 @@ import {
   canExecuteSellerAction,
   type SellerSensitiveAction,
 } from '@/lib/sellerActionPolicy';
-import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
   dispatchDemoSellerOrder,
@@ -25,14 +25,17 @@ import {
   refundDemoSellerOrder,
   rejectDemoSellerOrder,
 } from '../lib/localSellerOrders';
+import { getCommerceOrder } from '../lib/commerceClient';
 import {
   consumeApproval,
   evaluateRefund,
+  executeProtectedAction,
+  verifyReceipt,
   type AgentGuardApproval,
   type AgentGuardReceipt,
 } from '../lib/agentGuardClient';
+import { LEGACY_ACTION_ALIASES } from '@aadharchain/agentguard-contract';
 import { createSignedIdentityProof } from '../lib/trust';
-
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canDispatchOrder = (status: UCPOrderStatus): boolean =>
@@ -42,7 +45,7 @@ type SellerOrderMutation = 'accept' | 'reject' | 'dispatch';
 export function canMutateSellerOrder(
   status: UCPOrderStatus,
   mutation: SellerOrderMutation,
-  trustState: PortfolioTrustState,
+  trustState: PortfolioTrustState
 ): boolean {
   const actionByMutation: Record<SellerOrderMutation, SellerSensitiveAction> = {
     accept: 'order_accept',
@@ -53,6 +56,21 @@ export function canMutateSellerOrder(
   if (mutation === 'accept') return canAcceptOrder(status);
   if (mutation === 'reject') return canRejectOrder(status);
   return canDispatchOrder(status);
+}
+
+export function sellerRefundTrustSatisfied(
+  trustState: PortfolioTrustState,
+  principalId: string | null | undefined,
+  demoMode: boolean
+): boolean {
+  return demoMode || effectiveElevatedTrustState(trustState, principalId) === 'verified';
+}
+
+export function sellerApprovalNeedsWalletProof(
+  principalId: string | null | undefined,
+  demoMode: boolean
+): boolean {
+  return !demoMode && !principalId;
 }
 
 const STATUS_LABELS: Record<UCPOrderStatus, string> = {
@@ -143,7 +161,7 @@ export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { signMessage } = useWallet();
-  const { subjectId, walletAddress } = useSubject();
+  const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
   const [order, setOrder] = useState<UCPOrder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -164,21 +182,27 @@ export function OrderDetailPage() {
       }
 
       try {
-        if (COMMERCE_DEMO_MODE) {
-          const demoOrder = getDemoSellerOrder(id);
-          if (!demoOrder) {
-            throw new Error('Order not found');
+        // The shared commerce exchange is the portfolio order source in both
+        // local and deployed AgentGuard lanes. A configured legacy UCP API is
+        // only a fallback; local fixtures are last.
+        try {
+          setOrder(await getCommerceOrder(id));
+          return;
+        } catch (commerceError) {
+          if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
+            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`), {
+              credentials: 'include',
+            });
+            if (!response.ok) throw commerceError;
+            const data = await response.json();
+            setOrder(data.order);
+            return;
           }
+          const demoOrder = getDemoSellerOrder(id);
+          if (!demoOrder) throw commerceError;
           setOrder(demoOrder);
           return;
         }
-
-        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`), {
-          credentials: 'include',
-        });
-        if (!response.ok) throw new Error('Order not found');
-        const data = await response.json();
-        setOrder(data.order);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load order');
       } finally {
@@ -231,7 +255,7 @@ export function OrderDetailPage() {
             walletAddress,
             subjectId,
             auditSubjectId: id,
-          }),
+          })
         ),
       });
       if (!response.ok) throw new Error('Failed to accept order');
@@ -298,7 +322,7 @@ export function OrderDetailPage() {
             subjectId,
             auditSubjectId: id,
             auditReferenceId: 'seller-rejection',
-          }),
+          })
         ),
         body: JSON.stringify({ reason: 'Seller rejected the order' }),
       });
@@ -367,7 +391,7 @@ export function OrderDetailPage() {
             subjectId,
             auditSubjectId: id,
             auditReferenceId: trackingId,
-          }),
+          })
         ),
         body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
       });
@@ -400,17 +424,19 @@ export function OrderDetailPage() {
     setLastReceipt(receipt);
     setPendingApproval(null);
     setAgentGuardMessage(
-      `Refund INR ${amountInr} allowed. Receipt ${receipt.receipt_id} (no identity data).`,
+      `Refund INR ${amountInr} allowed. Receipt ${receipt.receipt_id} (no identity data).`
     );
   }
 
   async function handleAgentGuardRefund(amountInr: number) {
     if (!order || !id) return;
-    if (!walletAddress) {
-      setError('Connect and sign in with AadhaarChain before AgentGuard refunds.');
+    // AgentGuard binds cookie principal; wallet is legacy hangar only.
+    if (!subjectId) {
+      setError('Sign in before AgentGuard refunds.');
       return;
     }
-    if (trust.state !== 'verified') {
+    // Session principal AG does not require hangar wallet KYC.
+    if (!sellerRefundTrustSatisfied(trust.state, principalId, COMMERCE_DEMO_MODE)) {
       setError('Verified seller trust is required for AgentGuard refunds.');
       return;
     }
@@ -418,6 +444,47 @@ export function OrderDetailPage() {
     setError(null);
     setAgentGuardMessage(null);
     try {
+      const refundAttemptId = globalThis.crypto.randomUUID();
+      // Prefer execute boundary for in-policy refunds (evaluate+commerce in one call).
+      try {
+        const executed = await executeProtectedAction({
+          walletAddress,
+          action: LEGACY_ACTION_ALIASES.refund,
+          amountInr,
+          resourceId: id,
+          idempotencyKey: `seller-refund:${id}:${amountInr}:${refundAttemptId}`,
+          payload: { order_id: id },
+        });
+        if (executed.decision === 'need_approval' && executed.approval) {
+          setPendingApproval(executed.approval);
+          setLastApprovalId(executed.approval.approval_id);
+          setAgentGuardMessage(
+            executed.approval ? 'Approval required for this refund.' : 'Approval required.'
+          );
+          return;
+        }
+        if (executed.receipt) {
+          if (executed.receipt.outcome === 'paused' || executed.decision === 'deny') {
+            setAgentGuardMessage(
+              executed.receipt.outcome === 'paused' || /paus/i.test(String(executed.decision))
+                ? 'Agent is paused.'
+                : 'Refund denied while agent is paused or out of policy.'
+            );
+            setLastReceipt(executed.receipt);
+            return;
+          }
+          await applyAllowedRefund(amountInr, executed.receipt);
+          const verified = await verifyReceipt({ receiptId: executed.receipt.receipt_id });
+          if (verified.valid) {
+            setAgentGuardMessage(
+              `Refund INR ${amountInr} allowed. Receipt ${executed.receipt.receipt_id} verified.`
+            );
+          }
+          return;
+        }
+      } catch {
+        // Fall back to evaluate-only path for need_approval UX when execute requires approval payload.
+      }
       const result = await evaluateRefund({
         walletAddress,
         amountInr,
@@ -444,7 +511,7 @@ export function OrderDetailPage() {
   }
 
   async function handleApproveOnce() {
-    if (!pendingApproval || !walletAddress) {
+    if (!pendingApproval || !subjectId) {
       setError('No pending approval.');
       return;
     }
@@ -452,14 +519,18 @@ export function OrderDetailPage() {
     setError(null);
     try {
       // Demo/Hermes: skip wallet popup; consume is the one-time authority gate.
-      if (!COMMERCE_DEMO_MODE && signMessage) {
+      if (
+        sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE) &&
+        signMessage &&
+        walletAddress
+      ) {
         await createSignedIdentityProof({
           walletAddress,
-          audience: 'ondcseller',
+          audience: 'seller',
           purpose: 'seller_refund_approval',
           signMessage,
         });
-      } else if (!COMMERCE_DEMO_MODE && !signMessage) {
+      } else if (sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE)) {
         setError('Wallet signMessage is required to approve once.');
         return;
       }
@@ -477,7 +548,7 @@ export function OrderDetailPage() {
 
   async function handleReplayApproval() {
     const approvalId = lastApprovalId || pendingApproval?.approval_id;
-    if (!approvalId || !walletAddress) {
+    if (!approvalId || !subjectId) {
       setError('No approval to replay.');
       return;
     }
@@ -491,7 +562,7 @@ export function OrderDetailPage() {
       setAgentGuardMessage('Unexpected: replay succeeded');
     } catch (err) {
       setAgentGuardMessage(
-        err instanceof Error ? err.message : 'Approval already consumed (replay rejected).',
+        err instanceof Error ? err.message : 'Approval already consumed (replay rejected).'
       );
     } finally {
       setProcessing(null);
@@ -532,7 +603,9 @@ export function OrderDetailPage() {
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
             Orders
           </div>
-          <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">Order not found</h1>
+          <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
+            Order not found
+          </h1>
         </div>
         <Button variant="secondary" className="w-fit" onClick={() => navigate('/orders')}>
           Back to orders
@@ -561,7 +634,7 @@ export function OrderDetailPage() {
       </div>
 
       <TrustNotice
-        state={trust.state}
+        state={effectiveElevatedTrustState(trust.state, principalId)}
         loading={trust.loading}
         error={trust.error}
         reason={trust.reason}
@@ -571,7 +644,11 @@ export function OrderDetailPage() {
       <div className="flex flex-wrap gap-3">
         {canAcceptOrder(order.status) ? (
           <Button
-            disabled={processing === 'accept' || trust.loading || !canMutateSellerOrder(order.status, 'accept', trust.state)}
+            disabled={
+              processing === 'accept' ||
+              trust.loading ||
+              !canMutateSellerOrder(order.status, 'accept', trust.state)
+            }
             onClick={() => void handleAccept()}
           >
             {processing === 'accept' ? 'Processing…' : 'Accept order'}
@@ -580,7 +657,11 @@ export function OrderDetailPage() {
         {canRejectOrder(order.status) ? (
           <Button
             variant="destructive"
-            disabled={processing === 'reject' || trust.loading || !canMutateSellerOrder(order.status, 'reject', trust.state)}
+            disabled={
+              processing === 'reject' ||
+              trust.loading ||
+              !canMutateSellerOrder(order.status, 'reject', trust.state)
+            }
             onClick={() => void handleReject()}
           >
             {processing === 'reject' ? 'Processing…' : 'Reject order'}
@@ -588,7 +669,11 @@ export function OrderDetailPage() {
         ) : null}
         {canDispatchOrder(order.status) ? (
           <Button
-            disabled={processing === 'dispatch' || trust.loading || !canMutateSellerOrder(order.status, 'dispatch', trust.state)}
+            disabled={
+              processing === 'dispatch' ||
+              trust.loading ||
+              !canMutateSellerOrder(order.status, 'dispatch', trust.state)
+            }
             onClick={() => void handleDispatch()}
           >
             {processing === 'dispatch' ? 'Processing…' : 'Dispatch order'}
@@ -602,13 +687,12 @@ export function OrderDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Demo: INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR
-            5,000.
+            Demo: INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR 5,000.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
               data-testid="refund-3000"
-              disabled={!!processing || trust.loading || !walletAddress}
+              disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
               onClick={() => void handleAgentGuardRefund(3000)}
             >
               {processing === 'refund-3000' ? 'Processing…' : 'Refund INR 3,000'}
@@ -616,7 +700,7 @@ export function OrderDetailPage() {
             <Button
               data-testid="refund-7500"
               variant="outline"
-              disabled={!!processing || trust.loading || !walletAddress}
+              disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
               onClick={() => void handleAgentGuardRefund(7500)}
             >
               {processing === 'refund-7500' ? 'Processing…' : 'Refund INR 7,500'}
@@ -632,7 +716,11 @@ export function OrderDetailPage() {
               {pendingApproval ? (
                 <Button
                   data-testid="approve-once"
-                  disabled={!!processing || (!COMMERCE_DEMO_MODE && !signMessage)}
+                  disabled={
+                    !!processing ||
+                    (sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE) &&
+                      !signMessage)
+                  }
                   onClick={() => void handleApproveOnce()}
                 >
                   {processing === 'approve' ? 'Approving…' : 'Approve once'}
@@ -705,7 +793,11 @@ export function OrderDetailPage() {
                     <p className="text-sm text-muted-foreground">{order.deliveryAddress.line2}</p>
                   ) : null}
                   <p className="text-sm text-muted-foreground">
-                    {[order.deliveryAddress?.city, order.deliveryAddress?.state, order.deliveryAddress?.postalCode]
+                    {[
+                      order.deliveryAddress?.city,
+                      order.deliveryAddress?.state,
+                      order.deliveryAddress?.postalCode,
+                    ]
                       .filter(Boolean)
                       .join(', ')}
                   </p>
@@ -722,7 +814,9 @@ export function OrderDetailPage() {
                   <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                     Fulfillment
                   </div>
-                  <p className="text-sm text-foreground">{order.fulfillment?.providerName || 'Pending provider'}</p>
+                  <p className="text-sm text-foreground">
+                    {order.fulfillment?.providerName || 'Pending provider'}
+                  </p>
                   <p className="text-sm text-muted-foreground">
                     {order.fulfillment?.tracking?.statusMessage || 'No tracking update yet.'}
                   </p>
@@ -731,8 +825,12 @@ export function OrderDetailPage() {
                   <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                     Payment
                   </div>
-                  <p className="text-sm text-foreground">{order.payment?.type || 'Unknown payment type'}</p>
-                  <p className="text-sm text-muted-foreground">{order.payment?.status || 'Unknown status'}</p>
+                  <p className="text-sm text-foreground">
+                    {order.payment?.type || 'Unknown payment type'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {order.payment?.status || 'Unknown status'}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -753,7 +851,8 @@ export function OrderDetailPage() {
                     <p className="text-sm text-muted-foreground">Quantity: {item.quantity}</p>
                   </div>
                   <div className="text-right text-sm font-medium text-primary">
-                    {order.quote?.total?.currency || item.price.currency} {item.price.value ?? item.price.amount}
+                    {order.quote?.total?.currency || item.price.currency}{' '}
+                    {item.price.value ?? item.price.amount}
                   </div>
                 </div>
               ))}
@@ -770,7 +869,9 @@ export function OrderDetailPage() {
                   <div key={note.id} className="rounded-3xl border border-border/70 bg-card/95 p-4">
                     <p className="text-sm text-foreground">{note.note}</p>
                     {note.next_step ? (
-                      <p className="mt-2 text-sm text-muted-foreground">Next step: {note.next_step}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Next step: {note.next_step}
+                      </p>
                     ) : null}
                     <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
                       {formatDate(note.created_at)}
@@ -791,7 +892,8 @@ export function OrderDetailPage() {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Order total</span>
                 <span className="text-lg font-semibold text-primary">
-                  {order.quote?.total?.currency} {order.quote?.total?.value ?? order.quote?.total?.amount}
+                  {order.quote?.total?.currency}{' '}
+                  {order.quote?.total?.value ?? order.quote?.total?.amount}
                 </span>
               </div>
               <div className="flex items-center justify-between text-sm">

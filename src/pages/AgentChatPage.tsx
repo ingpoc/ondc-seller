@@ -1,3 +1,4 @@
+import { elevatedTrustSatisfied } from '@/lib/trust';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -28,6 +29,9 @@ import type {
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '@/lib/commerceConfig';
 import { getDemoCatalogItems } from '@/lib/mockCatalog';
 import { listDemoSellerOrders } from '@/lib/localSellerOrders';
+import { SELLER_TOOL_DEFINITIONS } from '@/lib/agentTools';
+import { runSellerRuntimeTask } from '@/lib/runSellerRuntimeTask';
+import { consumeSellerRuntimeHandoff } from '@/lib/samanthaRuntimeHandoff';
 
 interface SellerChatMessage {
   role: 'user' | 'assistant' | 'system' | 'error';
@@ -138,55 +142,6 @@ function toneForAction(action: SellerAgentAction) {
   return 'info' as const;
 }
 
-async function processSellerStream(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  handlers: {
-    onDelta: () => void;
-    onResult: (content: string) => void;
-    onError: (error: string) => void;
-    onDone: () => void;
-  },
-) {
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      handlers.onDone();
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data:')) {
-        continue;
-      }
-
-      const data = line.replace(/^data:\s*/, '').trim();
-      if (!data || data === '[DONE]') {
-        continue;
-      }
-
-      try {
-        const event = JSON.parse(data) as { type?: string; content?: string; error?: string };
-        if (event.type === 'assistant_delta') {
-          handlers.onDelta();
-        } else if (event.type === 'result' && typeof event.content === 'string') {
-          handlers.onResult(event.content);
-        } else if (event.type === 'error' && typeof event.error === 'string') {
-          handlers.onError(event.error);
-        }
-      } catch (error) {
-        handlers.onError(error instanceof Error ? error.message : 'Failed to parse seller agent stream.');
-      }
-    }
-  }
-}
-
 function SnapshotCard({
   label,
   value,
@@ -235,7 +190,7 @@ function SnapshotPanel({ snapshot }: { snapshot: SellerAgentSnapshot }) {
 export function AgentChatPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const { walletAddress, subjectId, authLoading } = useSubject();
+  const { walletAddress, subjectId, principalId, authLoading } = useSubject();
   const trust = useTrustState(walletAddress);
   const runtime = useAgentRuntime(subjectId, walletAddress);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -255,6 +210,7 @@ export function AgentChatPage(): JSX.Element {
   const latestActionsRef = useRef(latestActions);
   const trustBlockReasonRef = useRef(trustBlockReason);
   const pendingEnvelopeRef = useRef<SellerAgentResponseEnvelope | null>(null);
+  const handoffConsumedRef = useRef(false);
 
   const usageLabel =
     runtime.usage.requests_limit > 0
@@ -283,8 +239,8 @@ export function AgentChatPage(): JSX.Element {
     persistUiState(next);
   };
 
-  const sendMessage = async () => {
-    const prompt = input.trim();
+  const sendMessage = async (promptOverride?: string) => {
+    const prompt = (promptOverride ?? input).trim();
     if (!prompt || isLoading || !subjectId) {
       return;
     }
@@ -311,34 +267,17 @@ export function AgentChatPage(): JSX.Element {
     pendingEnvelopeRef.current = null;
 
     try {
-      const response = await fetch(buildAgentControlPlaneUrl('/api/agent/seller'), {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Id': subjectId,
-          ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+      await runSellerRuntimeTask({
+        prompt,
+        sessionId: sessionIdRef.current,
+        subjectId,
+        walletAddress,
+        context: {
+          seller_snapshot: snapshot,
+          response_contract: 'seller_agent_v1',
+          agentguard_tools: SELLER_TOOL_DEFINITIONS,
+          tool_runner: 'ondcseller/agentTools',
         },
-        body: JSON.stringify({
-          prompt,
-          sessionId: sessionIdRef.current,
-          context: {
-            seller_snapshot: snapshot,
-            response_contract: 'seller_agent_v1',
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body returned by the seller agent.');
-      }
-
-      await processSellerStream(reader, {
         onDelta: () => setStreaming(true),
         onResult: (content) => {
           const envelope = extractSellerAgentEnvelope(content);
@@ -474,6 +413,19 @@ export function AgentChatPage(): JSX.Element {
   }, [isLoading]);
 
   useEffect(() => {
+    if (!showAgent || isLoading || handoffConsumedRef.current) return;
+    const handoff = consumeSellerRuntimeHandoff();
+    if (!handoff?.task) return;
+    handoffConsumedRef.current = true;
+    if (handoff.sessionId) {
+      sessionIdRef.current = handoff.sessionId;
+      window.localStorage.setItem(SESSION_STORAGE_KEY, handoff.sessionId);
+    }
+    void sendMessage(handoff.task);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot Samantha handoff on mount/access
+  }, [showAgent, isLoading]);
+
+  useEffect(() => {
     messagesRef.current = messages;
     latestSummaryRef.current = latestSummary;
     latestActionsRef.current = latestActions;
@@ -558,7 +510,7 @@ export function AgentChatPage(): JSX.Element {
           <Alert
             tone="warning"
             title="Authentication required"
-            description="Sign in to AadhaarChain or connect a verified seller wallet before starting the seller agent."
+            description="Sign in before starting the seller agent."
           />
         ) : null}
 
@@ -573,13 +525,12 @@ export function AgentChatPage(): JSX.Element {
           />
         ) : null}
 
-        {subjectId && runtime.agent_access && trust.state !== 'verified' ? (
+        {subjectId && runtime.agent_access && !elevatedTrustSatisfied(trust.state, principalId) ? (
           <TrustNotice
             state={trust.state}
             loading={trust.loading}
             error={trust.error}
             reason={trust.reason}
-            actionLabel="Resolve trust in AadhaarChain"
           />
         ) : null}
 
@@ -682,7 +633,7 @@ export function AgentChatPage(): JSX.Element {
                   <Button
                     type="button"
                     onClick={approvePendingWrites}
-                    disabled={trust.state !== 'verified'}
+                    disabled={!elevatedTrustSatisfied(trust.state, principalId)}
                   >
                     Approve and apply writes
                   </Button>

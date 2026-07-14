@@ -340,7 +340,7 @@ export function refundDemoSellerOrder(orderId: string, amountInr: number, receip
       reason: `AgentGuard refund INR ${amountInr} (receipt ${receiptId})`,
       refundedAmount: amountInr,
       refund: {
-        amount: amountInr,
+        amount: { amount: amountInr, currency: 'INR' },
         currency: 'INR',
         receiptId,
         status: 'completed',

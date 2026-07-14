@@ -45,7 +45,7 @@ describe('sellerActionPolicy', () => {
     expect(decision).toMatchObject({
       allowed: false,
       requiredTrustState: 'verified',
-      reason: 'Verified seller trust is required before this seller action can execute.',
+      reason: 'Sign in or verified trust is required before this seller action can execute.',
     });
   });
 
@@ -90,7 +90,9 @@ describe('sellerActionPolicy', () => {
         walletAddress: 'seller-wallet',
         auditSubjectId: 'item-1',
       }),
-    ).toThrow('Verified seller trust is required before this seller action can execute.');
+    ).toThrow(
+      'Sign in or verified trust is required before this seller action can execute.',
+    );
   });
 
   it('requires wallet and audit subject before protected seller actions are sent', () => {
@@ -108,5 +110,16 @@ describe('sellerActionPolicy', () => {
         walletAddress: 'seller-wallet',
       }),
     ).toThrow('Audit subject is required before protected seller actions can be sent.');
+  });
+
+  it('allows session principal without wallet for protected seller actions', () => {
+    const policy = buildSellerBackendActionPolicy('catalog_save', {
+      trustState: 'no_identity',
+      walletAddress: null,
+      subjectId: 'principal:demo:booth',
+      auditSubjectId: 'item-1',
+    });
+    expect(policy.wallet_address).toBe('principal:demo:booth');
+    expect(policy.client_observed_trust_state).toBe('verified');
   });
 });

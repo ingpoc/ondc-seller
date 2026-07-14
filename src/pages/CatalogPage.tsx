@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useWallet } from '@solana/wallet-adapter-react';
 import type { BecknItem } from '@ondc-sdk/shared';
 import {
   AsyncState,
@@ -16,6 +15,7 @@ import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { InventoryTable } from '../components';
 import { TrustNotice } from '../components/TrustStatus';
+import { elevatedTrustSatisfied } from '../lib/trust';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { deleteDemoCatalogItem } from '../lib/mockCatalog';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
@@ -42,29 +42,33 @@ function formatCategory(categoryId?: string | null) {
     return 'General';
   }
 
-  return categoryId
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return categoryId.replace(/[-_]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export function CatalogPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim().toLowerCase();
-  const { publicKey } = useWallet();
-  const { subjectId, walletAddress } = useSubject();
+  const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
   const { data, loading, error, execute } = useApi('/api/catalog');
-  const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
+  const trustBlocksCatalog = !trust.loading && !elevatedTrustSatisfied(trust.state, principalId);
 
   useEffect(() => {
     void execute();
   }, [execute]);
 
+  useEffect(() => {
+    const refreshPublishedCatalog = () => void execute();
+    window.addEventListener('seller-catalog-changed', refreshPublishedCatalog);
+    return () => window.removeEventListener('seller-catalog-changed', refreshPublishedCatalog);
+  }, [execute]);
+
   const items = useMemo(
-    () => (((data as any)?.['bpp/providers']?.[0]?.items ?? []) as CatalogItem[]),
+    () => ((data as any)?.['bpp/providers']?.[0]?.items ?? []) as CatalogItem[],
     [data]
   );
+  const usingLocalCatalogCache = (data as any)?.__source === 'local';
   const filteredItems = useMemo(() => {
     if (!query) {
       return items;
@@ -85,7 +89,8 @@ export function CatalogPage() {
     });
   }, [items, query]);
   const featuredItems = filteredItems.slice(0, 3);
-  const categoryCount = new Set(filteredItems.map((item) => item.category_id ?? 'uncategorized')).size;
+  const categoryCount = new Set(filteredItems.map((item) => item.category_id ?? 'uncategorized'))
+    .size;
   const imageryCount = filteredItems.filter((item) => item.images?.[0]?.url).length;
 
   const handleEdit = useCallback(
@@ -161,7 +166,7 @@ export function CatalogPage() {
             subjectId,
             auditSubjectId: itemId,
             auditReferenceId: 'catalog-delete',
-          }),
+          })
         ),
       });
 
@@ -187,10 +192,13 @@ export function CatalogPage() {
     <PageLayout>
       <Section
         eyebrow="Seller catalog"
-        title={query ? `Catalog matches for “${searchParams.get('q')}”` : 'Run a tighter product shelf'}
+        title={
+          query ? `Catalog matches for “${searchParams.get('q')}”` : 'Run a tighter product shelf'
+        }
         description="Review the inventory buyers will actually encounter, then edit the exact SKU that needs cleanup."
         actions={
           <div className="flex flex-wrap gap-3">
+            {usingLocalCatalogCache ? <Badge tone="warning">Demo (local cache)</Badge> : null}
             <Button type="button" variant="secondary" onClick={() => void execute()}>
               Refresh catalog
             </Button>
@@ -213,7 +221,11 @@ export function CatalogPage() {
           <StatCard
             label="Visible products"
             value={filteredItems.length}
-            hint={query ? `${items.length} total products in the full catalog` : 'Active SKUs in the current view'}
+            hint={
+              query
+                ? `${items.length} total products in the full catalog`
+                : 'Active SKUs in the current view'
+            }
           />
           <StatCard
             label="Categories covered"
@@ -225,13 +237,17 @@ export function CatalogPage() {
             label="Image coverage"
             value={imageryCount}
             hint="Listings with imagery read better in buyer result cards"
-            tone={imageryCount === filteredItems.length && filteredItems.length > 0 ? 'success' : 'warning'}
+            tone={
+              imageryCount === filteredItems.length && filteredItems.length > 0
+                ? 'success'
+                : 'warning'
+            }
           />
           <StatCard
             label="Trust control"
-            value={trust.loading ? 'Checking' : trust.state === 'verified' ? 'Open' : 'Restricted'}
-            hint={trust.reason ?? 'Catalog edits stay gated until seller trust is verified'}
-            tone={trust.state === 'verified' ? 'success' : 'warning'}
+            value={trust.loading ? 'Checking' : !trustBlocksCatalog ? 'Open' : 'Restricted'}
+            hint={trust.reason ?? 'Catalog edits stay gated until sign-in or trust is verified'}
+            tone={!trustBlocksCatalog ? 'success' : 'warning'}
           />
         </div>
       </Section>
@@ -264,9 +280,7 @@ export function CatalogPage() {
             eyebrow="Featured review"
             title="Spot-check the top listings"
             description="These cards mimic how the catalog reads at a glance before buyers drill into edit flows."
-            actions={
-              query ? <Badge tone="info">{filteredItems.length} matches</Badge> : null
-            }
+            actions={query ? <Badge tone="info">{filteredItems.length} matches</Badge> : null}
           >
             {featuredItems.length === 0 ? (
               <AsyncState
@@ -317,7 +331,8 @@ export function CatalogPage() {
                           {item.descriptor?.name ?? 'Untitled product'}
                         </h3>
                         <p className="text-sm text-[var(--ui-text-secondary)]">
-                          {item.descriptor?.short_desc ?? 'Add a concise product description for buyer discovery.'}
+                          {item.descriptor?.short_desc ??
+                            'Add a concise product description for buyer discovery.'}
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3">

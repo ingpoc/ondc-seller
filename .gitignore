@@ -35,3 +35,5 @@ mcp/
 coverage/
 .nyc_output/
 .vercel
+.env*
+.env.production.local

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +12,7 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { TrustNotice } from '../components/TrustStatus';
+import { effectiveElevatedTrustState, elevatedTrustSatisfied } from '../lib/trust';
 import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
@@ -68,8 +68,7 @@ function createDemoPrivateKey(): string {
 }
 
 export function ConfigPage() {
-  const { publicKey } = useWallet();
-  const { subjectId, walletAddress } = useSubject();
+  const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
   const [config, setConfig] = useState<SellerClientConfig>(INITIAL_CONFIG);
   const [errors, setErrors] = useState<ConfigError[]>([]);
@@ -77,7 +76,9 @@ export function ConfigPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
-  const canChangeConfiguration = !trust.loading && canMutateSellerConfig(trust.state);
+  const canChangeConfiguration =
+    !trust.loading &&
+    (elevatedTrustSatisfied(trust.state, principalId) || canMutateSellerConfig(trust.state));
 
   useEffect(() => {
     void loadConfig();
@@ -161,7 +162,8 @@ export function ConfigPage() {
       });
       setTestResult({
         success: false,
-        message: 'Verified seller trust is required before changing payout or seller configuration.',
+        message:
+          'Verified seller trust is required before changing payout or seller configuration.',
       });
       return;
     }
@@ -195,7 +197,7 @@ export function ConfigPage() {
             walletAddress,
             subjectId,
             auditSubjectId: config.subscriberId || 'seller-config',
-          }),
+          })
         ),
         body: JSON.stringify(config),
       });
@@ -251,7 +253,7 @@ export function ConfigPage() {
           reason: decision.reason,
         });
         throw new Error(
-          'Verified seller trust is required before changing payout or seller configuration.',
+          'Verified seller trust is required before changing payout or seller configuration.'
         );
       }
 
@@ -288,7 +290,7 @@ export function ConfigPage() {
             subjectId,
             auditSubjectId: config.subscriberId || 'seller-config',
             auditReferenceId: 'generate-keys',
-          }),
+          })
         ),
       });
       if (!response.ok) {
@@ -395,11 +397,10 @@ export function ConfigPage() {
       </div>
 
       <TrustNotice
-        state={trust.state}
+        state={effectiveElevatedTrustState(trust.state, principalId)}
         loading={trust.loading}
         error={trust.error}
         reason={trust.reason}
-        actionLabel="Resolve operator trust in AadhaarChain"
       />
 
       {testResult ? (
@@ -411,7 +412,13 @@ export function ConfigPage() {
           }
         >
           <CardContent className="p-4">
-            <Badge className={testResult.success ? 'bg-primary/12 text-primary' : 'bg-destructive/12 text-destructive'}>
+            <Badge
+              className={
+                testResult.success
+                  ? 'bg-primary/12 text-primary'
+                  : 'bg-destructive/12 text-destructive'
+              }
+            >
               {testResult.success ? 'Configuration healthy' : 'Configuration issue'}
             </Badge>
             <p className="mt-3 text-sm text-muted-foreground">{testResult.message}</p>
@@ -443,7 +450,9 @@ export function ConfigPage() {
                     placeholder="https://gateway.ondc.org"
                     aria-invalid={!!getFieldError('baseUrl')}
                   />
-                  <FieldDescription>Use the ONDC gateway your seller node should target.</FieldDescription>
+                  <FieldDescription>
+                    Use the ONDC gateway your seller node should target.
+                  </FieldDescription>
                   <FieldError>{getFieldError('baseUrl')}</FieldError>
                 </FieldContent>
               </Field>
@@ -511,7 +520,9 @@ export function ConfigPage() {
                     onChange={(event) => setConfig({ ...config, keyId: event.target.value })}
                     placeholder="seller-1712345678901"
                   />
-                  <FieldDescription>Used to identify the currently active signing key.</FieldDescription>
+                  <FieldDescription>
+                    Used to identify the currently active signing key.
+                  </FieldDescription>
                 </FieldContent>
               </Field>
             </FieldGroup>

@@ -109,10 +109,7 @@ function Card({
 }: ComponentProps<typeof PrimitiveCard>) {
   return (
     <PrimitiveCard
-      className={cn(
-        'px-6 shadow-[var(--ui-shadow-sm)] ring-[color:var(--ui-border)]/80',
-        className,
-      )}
+      className={cn('px-6 shadow-none ring-1 ring-border/60', className)}
       {...props}
     />
   );
@@ -194,9 +191,7 @@ function Section({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
             {eyebrow ? (
-              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-                {eyebrow}
-              </div>
+              <div className="text-sm text-muted-foreground">{eyebrow}</div>
             ) : null}
             {title ? (
               <h2 className="text-2xl font-bold tracking-[-0.03em] text-[var(--ui-text)]">
@@ -228,27 +223,20 @@ function StatCard({
   hint?: ReactNode;
   tone?: Tone;
 }) {
-  const toneLabel: Record<Tone, string> = {
-    info: 'Info',
-    success: 'Ready',
-    warning: 'Watch',
-    error: 'Alert',
-    neutral: 'Live',
-  };
-
   return (
-    <Card className="gap-4 bg-card/95">
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-          {label}
-        </div>
-        <Badge tone={tone}>{toneLabel[tone]}</Badge>
+    <div className="flex flex-col gap-1 border-t border-border/70 pt-4">
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          'quant text-3xl font-semibold tracking-tight text-foreground',
+          tone === 'error' && 'text-destructive',
+          tone === 'success' && 'text-primary',
+        )}
+      >
+        {value}
       </div>
-      <div className="text-3xl font-bold tracking-[-0.04em] text-[var(--ui-text)]">{value}</div>
-      {hint ? (
-        <div className="text-sm text-[var(--ui-text-secondary)]">{hint}</div>
-      ) : null}
-    </Card>
+      {hint ? <div className="text-sm text-muted-foreground">{hint}</div> : null}
+    </div>
   );
 }
 

@@ -1,35 +1,37 @@
 /**
- * Portfolio SSO via AadhaarChain gateway cookie.
- * Local dev: set VITE_IDENTITY_AUTH_ENABLED=true in .env.local.
- * Login redirects to VITE_IDENTITY_WEB_URL/login with aud=ondcseller.
+ * Portfolio auth via gateway principal session (Auth0, Google, or booth demo).
+ * Local: VITE_IDENTITY_AUTH_ENABLED=true in .env.local.
+ * Production IdP: Auth0 Authorization Code Flow → aadharcha_session cookie.
  */
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { SSOUser } from '@/lib/api';
-import { IDENTITY_URL, IDENTITY_WEB_URL } from '@/lib/identityUrls';
+import { IDENTITY_URL } from '@/lib/identityUrls';
 
 const LOCAL_IDENTITY_AUTH_ENABLED = import.meta.env.VITE_IDENTITY_AUTH_ENABLED === 'true';
+const AUDIENCE = 'ondcseller';
 
 export type { SSOUser };
 
 export interface AuthContextValue {
-  /** Current authenticated user (null if not logged in) */
   user: SSOUser | null;
-  /** Is user currently authenticated */
   isAuthenticated: boolean;
-  /** Is authentication state loading */
   loading: boolean;
-  /** Any authentication error */
   error: string | null;
-  /** Login to the identity-session provider */
   login: (returnUrl?: string) => void;
-  /** Logout from the identity-session provider */
+  loginAuth0: (returnUrl?: string) => void;
+  loginDemo: (returnUrl?: string) => void;
+  loginGoogle: (returnUrl?: string) => void;
   logout: () => void;
-  /** Refresh user state from the identity-session provider */
   refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function returnAbsolute(returnUrl = '/'): string {
+  if (returnUrl.startsWith('http')) return returnUrl;
+  return `${window.location.origin}${returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`}`;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SSOUser | null>(null);
@@ -43,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       return;
     }
-    validateSession();
+    void validateSession();
   }, []);
 
   const validateSession = async () => {
@@ -69,9 +71,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loginAuth0 = (returnUrl = '/') => {
+    const encoded = encodeURIComponent(returnAbsolute(returnUrl));
+    window.location.href = `${IDENTITY_URL}/api/auth/auth0/start?aud=${AUDIENCE}&return=${encoded}`;
+  };
+
+  const loginDemo = (returnUrl = '/') => {
+    const encoded = encodeURIComponent(returnAbsolute(returnUrl));
+    window.location.href = `${IDENTITY_URL}/api/auth/demo-continue?aud=${AUDIENCE}&return=${encoded}`;
+  };
+
+  const loginGoogle = (returnUrl = '/') => {
+    const encoded = encodeURIComponent(returnAbsolute(returnUrl));
+    window.location.href = `${IDENTITY_URL}/api/auth/google/start?aud=${AUDIENCE}&return=${encoded}`;
+  };
+
   const login = (returnUrl = '/') => {
-    const encodedReturn = encodeURIComponent(window.location.origin + returnUrl);
-    window.location.href = `${IDENTITY_WEB_URL}/login?return=${encodedReturn}&aud=ondcseller`;
+    loginAuth0(returnUrl);
   };
 
   const logout = async () => {
@@ -80,8 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'POST',
         credentials: 'include',
       });
-    } catch (error) {
-      console.error('Logout error:', error);
+    } catch (logoutError) {
+      console.error('Logout error:', logoutError);
     } finally {
       setUser(null);
       window.location.href = '/';
@@ -98,6 +114,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         login,
+        loginAuth0,
+        loginDemo,
+        loginGoogle,
         logout,
         refresh,
       }}

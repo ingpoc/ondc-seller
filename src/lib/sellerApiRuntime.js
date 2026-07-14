@@ -143,17 +143,17 @@ export function evaluateProtectedSellerRequest({
   }
 
   if (!trust) {
-    const reason = 'AadhaarChain trust state is unavailable.';
+    const reason = 'Trust state is unavailable.';
     return { allowed: false, status: 503, reason, audit: audit('blocked', reason) };
   }
 
   if (trust.wallet_address !== walletAddress) {
-    const reason = 'AadhaarChain trust wallet does not match the active session.';
+    const reason = 'Trust wallet does not match the active session.';
     return { allowed: false, status: 403, reason, audit: audit('blocked', reason) };
   }
 
   if (trust.trust_state !== 'verified' || trust.high_trust_eligible !== true) {
-    const reason = 'Verified AadhaarChain seller trust is required.';
+    const reason = 'Verified seller trust or demo/Google session is required.';
     return { allowed: false, status: 403, reason, audit: audit('blocked', reason) };
   }
 

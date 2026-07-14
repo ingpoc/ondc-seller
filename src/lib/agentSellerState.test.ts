@@ -239,7 +239,7 @@ describe('agentSellerState', () => {
       'identity_present_unverified',
     );
 
-    expect(result.trustBlockReason).toContain('Verified seller trust');
+    expect(result.trustBlockReason).toMatch(/Sign in or verified trust|Verified seller trust/i);
     expect(getDemoCatalogItems()[0]?.descriptor?.short_desc).toBe(beforeDescription);
   });
 
@@ -391,7 +391,7 @@ describe('agentSellerState', () => {
       return;
     }
 
-    expect(result.trustBlockReason).toContain('Verified seller trust');
+    expect(result.trustBlockReason).toMatch(/Sign in or verified trust|Verified seller trust/i);
     expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
     expect(after?.price?.value).toBe(before?.price?.value);
     expect(result.auditEvents[0]).toMatchObject({
@@ -432,7 +432,7 @@ describe('agentSellerState', () => {
       return;
     }
 
-    expect(result.trustBlockReason).toContain('Verified seller trust');
+    expect(result.trustBlockReason).toMatch(/Sign in or verified trust|Verified seller trust/i);
     expect(listSellerOrderNotesForOrder('seller-demo-1001')).toEqual([]);
     expect(result.auditEvents[0]).toMatchObject({
       action: 'order_followup_note',

@@ -1,19 +1,13 @@
 import { ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
-import { normalizeLoopbackUrl } from '@/lib/loopback';
 import type { PortfolioTrustState } from '@/lib/trust';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-
-const IDENTITY_WEB_URL = normalizeLoopbackUrl(
-  import.meta.env.VITE_IDENTITY_WEB_URL || 'http://127.0.0.1:43100',
-);
 
 function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
   if (loading) {
     return {
       label: 'Loading',
-      description: 'Loading AadhaarChain trust state…',
+      description: 'Loading trust state…',
       className: 'bg-secondary text-secondary-foreground',
       icon: ShieldAlert,
     };
@@ -32,7 +26,7 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
       return {
         label: 'Unverified',
         description:
-          'Complete AadhaarChain verification before publishing or managing high-trust seller actions.',
+          'Identity is unverified. Sign in so AgentGuard can authorize elevated actions.',
         className: 'bg-accent text-accent-foreground',
         icon: ShieldAlert,
       };
@@ -48,15 +42,15 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
       return {
         label: 'Blocked',
         description:
-          'Your trust state is blocked or revoked. Review AadhaarChain before attempting elevated seller actions.',
+          'Your trust state is blocked or revoked. Sign in again or review your identity before elevated seller actions.',
         className: 'bg-destructive/12 text-destructive',
         icon: ShieldX,
       };
     default:
       return {
-        label: 'No identity',
+        label: 'Unsigned',
         description:
-          'Create an identity anchor in AadhaarChain before acting as a verified seller.',
+          'Sign in before elevated seller actions.',
         className: 'bg-secondary text-secondary-foreground',
         icon: ShieldAlert,
       };
@@ -74,12 +68,10 @@ export function TrustStatusChip({
   const Icon = meta.icon;
 
   return (
-    <a href={`${IDENTITY_WEB_URL}/home`} className="inline-flex">
-      <Badge className={meta.className}>
-        <Icon className="size-3.5" />
-        {loading ? 'Trust loading' : `Trust ${meta.label}`}
-      </Badge>
-    </a>
+    <Badge className={meta.className}>
+      <Icon className="size-3.5" />
+      {loading ? 'Trust loading' : `Trust ${meta.label}`}
+    </Badge>
   );
 }
 
@@ -88,12 +80,12 @@ export function TrustNotice({
   loading,
   error,
   reason,
-  actionLabel = 'Resolve trust in AadhaarChain',
 }: {
   state: PortfolioTrustState;
   loading?: boolean;
   error?: string | null;
   reason?: string | null;
+  /** @deprecated Ignored — hangar CTAs removed; use header Google/Demo sign-in. */
   actionLabel?: string;
 }) {
   const meta = getTrustMeta(state, loading);
@@ -111,17 +103,11 @@ export function TrustNotice({
             <Icon className="size-4" />
           </div>
           <div className="space-y-2">
-            <Badge className={meta.className}>AadhaarChain trust: {meta.label}</Badge>
+            <Badge className={meta.className}>Trust check: {meta.label}</Badge>
             <p className="max-w-3xl text-sm text-muted-foreground">
               {error || reason || meta.description}
             </p>
           </div>
-        </div>
-
-        <div>
-          <Button asChild variant={state === 'verified' ? 'secondary' : 'default'}>
-            <a href={`${IDENTITY_WEB_URL}/home`}>{actionLabel}</a>
-          </Button>
         </div>
       </CardContent>
     </Card>

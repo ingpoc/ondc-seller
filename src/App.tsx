@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Bot, Menu, Search, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useAgentRuntime, useSubject, useTrustState } from './hooks';
 import { DashboardPage } from './pages/DashboardPage';
 import { CatalogPage } from './pages/CatalogPage';
@@ -11,7 +10,8 @@ import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { AgentGuardPage } from './pages/AgentGuardPage';
 import { ConfigPage } from './pages/ConfigPage';
-import { Button, buttonVariants } from './components/ui/button';
+import { SamanthaOrb } from './components/SamanthaOrb';
+import { Button } from './components/ui/button';
 import { ButtonGroup, ButtonGroupText } from './components/ui/button-group';
 import {
   InputGroup,
@@ -27,10 +27,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
-import { normalizeLoopbackUrl } from './lib/loopback';
 import type { PortfolioTrustState } from './lib/trust';
 import { cn } from './lib/utils';
 import { useAuthContext } from './contexts/AuthContext';
+import { useAuthProviders } from './lib/authProviders';
 
 const IDENTITY_AUTH_ENABLED = import.meta.env.VITE_IDENTITY_AUTH_ENABLED === 'true';
 
@@ -41,6 +41,7 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
+  { href: '/agentguard', label: 'AgentGuard' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/catalog', label: 'Catalog' },
   { href: '/orders', label: 'Orders' },
@@ -48,25 +49,11 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const SECONDARY_NAV_ITEMS: NavItem[] = [
-  { href: '/agentguard', label: 'AgentGuard' },
-  { href: '/agent', label: 'Agent' },
+  { href: '/agent', label: 'Ask Samantha' },
   { href: '/usecase.html#agents', label: 'How it works', external: true },
 ];
 
-const IDENTITY_WEB_URL = normalizeLoopbackUrl(
-  import.meta.env.VITE_IDENTITY_WEB_URL || 'http://127.0.0.1:43100',
-);
 
-const WALLET_BUTTON_STYLE = {
-  backgroundColor: 'var(--primary)',
-  color: 'var(--primary-foreground)',
-  borderRadius: '999px',
-  boxShadow: 'var(--wallet-shadow)',
-  height: '40px',
-  padding: '0 16px',
-  fontSize: '0.875rem',
-  fontWeight: 600,
-};
 
 type HeaderControl = 'search' | 'runtime' | 'trust' | null;
 
@@ -83,6 +70,9 @@ function getActivePath(pathname: string): string {
   if (pathname.startsWith('/config')) {
     return '/config';
   }
+  if (pathname.startsWith('/agentguard')) {
+    return '/agentguard';
+  }
   if (pathname.startsWith('/agent')) {
     return '/agent';
   }
@@ -93,7 +83,7 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
   if (loading) {
     return {
       label: 'Loading',
-      detail: 'Checking AadhaarChain before elevated seller actions unlock.',
+      detail: 'Checking session trust before elevated seller actions unlock.',
       className: 'bg-secondary text-secondary-foreground',
       icon: ShieldAlert,
     };
@@ -124,14 +114,14 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
     case 'revoked_or_blocked':
       return {
         label: 'Blocked',
-        detail: 'Trust is blocked or revoked. Review AadhaarChain before continuing.',
+        detail: 'Trust is blocked or revoked. Sign in again or review your identity.',
         className: 'bg-destructive/12 text-destructive',
         icon: ShieldX,
       };
     default:
       return {
-        label: 'No identity',
-        detail: 'Create a wallet-backed identity before acting as a trust-aware seller.',
+        label: 'Unsigned',
+        detail: 'Sign in before elevated seller actions.',
         className: 'bg-secondary text-secondary-foreground',
         icon: ShieldAlert,
       };
@@ -190,25 +180,14 @@ function NavigationLink({
 }) {
   if (external) {
     return (
-      <a
-        href={href}
-        onClick={onNavigate}
-        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'rounded-full')}
-      >
+      <a href={href} onClick={onNavigate} className="nav-pill" data-active="false">
         {label}
       </a>
     );
   }
 
   return (
-    <Link
-      to={href}
-      onClick={onNavigate}
-      className={cn(
-        buttonVariants({ variant: active ? 'secondary' : 'ghost', size: 'sm' }),
-        'rounded-full',
-      )}
-    >
+    <Link to={href} onClick={onNavigate} className="nav-pill" data-active={active ? 'true' : 'false'}>
       {label}
     </Link>
   );
@@ -343,7 +322,9 @@ function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { walletAddress, subjectId } = useSubject();
-  const { isAuthenticated, loading: authLoading, login, logout } = useAuthContext();
+  const { isAuthenticated, loading: authLoading, loginAuth0, loginDemo, loginGoogle, logout } =
+    useAuthContext();
+  const authProviders = useAuthProviders();
   const trust = useTrustState(walletAddress);
   const runtime = useAgentRuntime(subjectId, walletAddress);
   const [activeControl, setActiveControl] = useState<HeaderControl>(null);
@@ -371,21 +352,18 @@ function HeaderBar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
+    <header className="shell-header">
+      <div className="shell-inner">
         <div className="min-w-0 shrink-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            Seller
-          </div>
-          <Link to="/dashboard" className="block text-xl font-semibold tracking-[-0.04em] text-foreground">
+          <Link to="/dashboard" className="block text-lg font-semibold tracking-tight text-foreground sm:text-xl">
             ONDC Seller
           </Link>
-          <div className="hidden text-sm text-muted-foreground sm:block">
-            Operate a trust-aware catalog and fulfillment surface.
+          <div className="hidden text-xs text-muted-foreground sm:block">
+            Catalog under AgentGuard authority
           </div>
         </div>
 
-        <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
+        <nav className="hidden flex-1 items-center justify-center gap-1.5 lg:flex">
           {NAV_ITEMS.map((item) => (
             <NavigationLink
               key={item.href}
@@ -420,7 +398,6 @@ function HeaderBar() {
             icon={trustMeta.icon}
             label={`Trust ${trustMeta.label}`}
             detail={trustMeta.detail}
-            href={`${IDENTITY_WEB_URL}/home`}
             expanded={activeControl === 'trust'}
             onExpand={() => setActiveControl('trust')}
             className={trustMeta.className}
@@ -439,18 +416,47 @@ function HeaderBar() {
                 Sign out
               </Button>
             ) : (
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-full"
-                onClick={() => login(location.pathname)}
-              >
-                Login with AadhaarChain
-              </Button>
+              <div className="flex items-center gap-2">
+                {authProviders.auth0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => loginAuth0(location.pathname)}
+                  >
+                    Sign in
+                  </Button>
+                ) : null}
+                {!authProviders.auth0 && authProviders.google ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => loginGoogle(location.pathname)}
+                  >
+                    Google
+                  </Button>
+                ) : null}
+                {authProviders.demo_continue ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => loginDemo(location.pathname)}
+                  >
+                    Booth
+                  </Button>
+                ) : null}
+                {!authProviders.loading &&
+                !authProviders.auth0 &&
+                !authProviders.google &&
+                !authProviders.demo_continue ? (
+                  <span className="text-xs text-muted-foreground">Sign-in not configured</span>
+                ) : null}
+              </div>
             )
           ) : null}
-
-          <WalletMultiButton style={WALLET_BUTTON_STYLE} />
         </div>
 
         <div className="ml-auto flex items-center gap-2 lg:hidden">
@@ -466,17 +472,47 @@ function HeaderBar() {
                 Sign out
               </Button>
             ) : (
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-full"
-                onClick={() => login(location.pathname)}
-              >
-                Login
-              </Button>
+              <div className="flex items-center gap-1">
+                {authProviders.auth0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => loginAuth0(location.pathname)}
+                  >
+                    Sign in
+                  </Button>
+                ) : null}
+                {!authProviders.auth0 && authProviders.google ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => loginGoogle(location.pathname)}
+                  >
+                    Google
+                  </Button>
+                ) : null}
+                {authProviders.demo_continue ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => loginDemo(location.pathname)}
+                  >
+                    Booth
+                  </Button>
+                ) : null}
+                {!authProviders.loading &&
+                !authProviders.auth0 &&
+                !authProviders.google &&
+                !authProviders.demo_continue ? (
+                  <span className="text-xs text-muted-foreground">Sign-in not configured</span>
+                ) : null}
+              </div>
             )
           ) : null}
-          <WalletMultiButton style={WALLET_BUTTON_STYLE} />
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <Button type="button" variant="outline" size="icon-sm" aria-label="Open seller navigation">
@@ -528,8 +564,7 @@ function HeaderBar() {
                     <span>Runtime {runtimeMeta.label}</span>
                   </div>
                   <a
-                    href={`${IDENTITY_WEB_URL}/home`}
-                    className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', trustMeta.className)}
+                            className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', trustMeta.className)}
                   >
                     <TrustIcon className="size-4" />
                     <span>Trust {trustMeta.label}</span>
@@ -566,7 +601,7 @@ export function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
-      <footer className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 border-t border-border/60 px-4 py-6 text-sm text-muted-foreground sm:px-6 lg:px-8">
+      <footer className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-3 border-t border-border/60 px-4 py-6 text-sm text-muted-foreground sm:px-6">
         {SECONDARY_NAV_ITEMS.map((item) => (
           <NavigationLink
             key={item.href}
@@ -577,6 +612,7 @@ export function App() {
           />
         ))}
       </footer>
+      <SamanthaOrb />
     </div>
   );
 }

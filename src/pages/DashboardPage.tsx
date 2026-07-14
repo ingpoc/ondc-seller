@@ -13,6 +13,7 @@ import { useApi } from '../hooks/useApi';
 import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
+import { elevatedTrustSatisfied } from '../lib/trust';
 
 interface SellerCatalogItem {
   id: string;
@@ -26,8 +27,9 @@ interface SellerCatalogItem {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { walletAddress } = useSubject();
+  const { walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
+  const elevatedOk = elevatedTrustSatisfied(trust.state, principalId);
   const { data, loading, error, execute } = useApi('/api/catalog');
 
   useEffect(() => {
@@ -42,14 +44,13 @@ export function DashboardPage() {
   const categoryCount = new Set(items.map((item) => item.category_id ?? 'uncategorized')).size;
   const trustLabel = trust.loading
     ? 'Checking'
-    : trust.state === 'verified'
+    : elevatedOk
       ? 'Verified'
       : 'Needs action';
 
   return (
     <PageLayout>
       <Section
-        eyebrow="Seller"
         title="Catalog and trust"
         description="Publish listings when verified. Open catalog to manage the full shelf."
         actions={
@@ -57,17 +58,20 @@ export function DashboardPage() {
             <Button
               type="button"
               onClick={() => navigate('/catalog/new')}
-              disabled={!trust.loading && trust.state !== 'verified'}
+              disabled={!trust.loading && !elevatedOk}
             >
               Add product
             </Button>
             <Button type="button" variant="secondary" onClick={() => navigate('/catalog')}>
               Open catalog
             </Button>
+            <Button type="button" variant="outline" onClick={() => navigate('/agentguard')}>
+              AgentGuard
+            </Button>
           </div>
         }
       >
-        {trust.state !== 'verified' || trust.error ? (
+        {!elevatedOk || trust.error ? (
           <TrustNotice
             state={trust.state}
             loading={trust.loading}
@@ -88,17 +92,14 @@ export function DashboardPage() {
             label="Trust"
             value={trustLabel}
             hint={trust.reason ?? 'Required for elevated publish actions'}
-            tone={trust.state === 'verified' ? 'success' : 'warning'}
+            tone={elevatedOk ? 'success' : 'warning'}
           />
         </div>
       </Section>
 
-      <Card className="mt-10 space-y-5">
-        <div className="space-y-2">
-          <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ui-text-muted)]">
-            Recent products
-          </div>
-          <h2 className="text-2xl font-bold tracking-[-0.03em] text-[var(--ui-text)]">
+      <Card className="mt-10 space-y-5 border-border/60 shadow-none">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             Inventory snapshot
           </h2>
         </div>
@@ -129,26 +130,26 @@ export function DashboardPage() {
               <Button
                 type="button"
                 onClick={() => navigate('/catalog/new')}
-                disabled={!trust.loading && trust.state !== 'verified'}
+                disabled={!trust.loading && !elevatedOk}
               >
                 Add first product
               </Button>
             }
           />
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y divide-border/70">
             {items.slice(0, 5).map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => navigate(`/catalog/${item.id}`)}
-                className="flex w-full items-start justify-between gap-4 rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-[var(--ui-shadow-sm)]"
+                className="flex w-full items-start justify-between gap-4 py-4 text-left transition-colors hover:bg-secondary/40"
               >
-                <div className="min-w-0 space-y-2">
-                  <div className="truncate text-base font-semibold text-[var(--ui-text)]">
+                <div className="min-w-0 space-y-1">
+                  <div className="truncate text-base font-medium text-foreground">
                     {item.descriptor?.name ?? 'Untitled product'}
                   </div>
-                  <div className="line-clamp-2 text-sm text-[var(--ui-text-secondary)]">
+                  <div className="line-clamp-2 text-sm text-muted-foreground">
                     {item.descriptor?.short_desc ?? 'Add a short descriptor for buyer cards.'}
                   </div>
                 </div>

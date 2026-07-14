@@ -3,22 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 
 import { cn } from '@/lib/utils';
-import {
-  AsyncState,
-  Badge,
-  Button,
-  Card,
-  PageHeader,
-  PageLayout,
-} from '@/components/seller-ui';
+import { AsyncState, Badge, Button, Card, PageHeader, PageLayout } from '@/components/seller-ui';
 import { TrustNotice } from '@/components/TrustStatus';
+import { effectiveElevatedTrustState, elevatedTrustSatisfied } from '@/lib/trust';
 import { useSubject, useTrustState } from '@/hooks';
-import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
   acceptDemoSellerOrder,
   listDemoSellerOrders,
   rejectDemoSellerOrder,
 } from '../lib/localSellerOrders';
+import { listCommerceSellerOrders, transitionCommerceSellerOrder } from '../lib/commerceClient';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
   buildSellerActionHeaders,
@@ -196,38 +191,52 @@ export function OrderCard({
 
 export function OrdersPage() {
   const navigate = useNavigate();
-  const { subjectId, walletAddress } = useSubject();
+  const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
   const [orders, setOrders] = useState<UCPOrder[]>([]);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-  const orderActionsDisabled = trust.loading || !canExecuteSellerAction('order_accept', trust.state);
+  const [usingLocalOrderCache, setUsingLocalOrderCache] = useState(false);
+  const orderActionsDisabled =
+    trust.loading ||
+    (!elevatedTrustSatisfied(trust.state, principalId) &&
+      !canExecuteSellerAction('order_accept', trust.state));
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      if (COMMERCE_DEMO_MODE) {
-        setOrders(listDemoSellerOrders());
+      // Portfolio stack: gateway /api/demo-commerce is the order source of truth.
+      // Legacy /api/seller/orders only when an external UCP base is configured.
+      try {
+        const commerceOrders = await listCommerceSellerOrders(walletAddress || undefined);
+        setOrders(commerceOrders);
+        setUsingLocalOrderCache(false);
         return;
+      } catch (primaryErr) {
+        if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
+          const response = await fetch(buildCommerceUrl('/api/seller/orders'), {
+            credentials: 'include',
+          });
+          if (!response.ok) {
+            throw primaryErr instanceof Error ? primaryErr : new Error('Failed to load orders');
+          }
+          const data = await response.json();
+          setOrders(data.orders || []);
+          setUsingLocalOrderCache(false);
+          return;
+        }
+        setOrders(listDemoSellerOrders());
+        setUsingLocalOrderCache(true);
       }
-
-      const response = await fetch(buildCommerceUrl('/api/seller/orders'), {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to load orders');
-      }
-      const data = await response.json();
-      setOrders(data.orders || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load orders');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [walletAddress]);
 
   useEffect(() => {
     void loadOrders();
@@ -235,7 +244,10 @@ export function OrdersPage() {
 
   const handleAccept = useCallback(
     async (orderId: string) => {
-      if (!canExecuteSellerAction('order_accept', trust.state)) {
+      if (
+        !elevatedTrustSatisfied(trust.state, principalId) &&
+        !canExecuteSellerAction('order_accept', trust.state)
+      ) {
         const reason = 'Verified seller trust is required before accepting orders.';
         recordSellerActionAuditEvent({
           action: 'order_accept',
@@ -252,38 +264,35 @@ export function OrdersPage() {
 
       setProcessing(orderId);
       try {
-        if (COMMERCE_DEMO_MODE) {
-          const next = acceptDemoSellerOrder(orderId);
-          if (!next) {
-            throw new Error('Order not found');
+        try {
+          await transitionCommerceSellerOrder(orderId, 'accepted');
+          await loadOrders();
+        } catch {
+          if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
+            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
+              method: 'POST',
+              credentials: 'include',
+              headers: buildSellerActionHeaders(
+                buildSellerBackendActionPolicy('order_accept', {
+                  trustState: trust.state,
+                  walletAddress,
+                  subjectId,
+                  auditSubjectId: orderId,
+                })
+              ),
+            });
+            if (!response.ok) {
+              throw new Error('Failed to accept order');
+            }
+            await loadOrders();
+          } else {
+            const next = acceptDemoSellerOrder(orderId);
+            if (!next) {
+              throw new Error('Order not found');
+            }
+            setOrders(listDemoSellerOrders());
+            setUsingLocalOrderCache(true);
           }
-          recordSellerActionAuditEvent({
-            action: 'order_accept',
-            targetId: orderId,
-            walletAddress,
-            subjectId,
-            trustState: trust.state,
-            outcome: 'applied',
-            reason: 'Accepted seller order from the orders list in demo mode.',
-          });
-          setOrders(listDemoSellerOrders());
-          return;
-        }
-
-        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
-          method: 'POST',
-          credentials: 'include',
-          headers: buildSellerActionHeaders(
-            buildSellerBackendActionPolicy('order_accept', {
-              trustState: trust.state,
-              walletAddress,
-              subjectId,
-              auditSubjectId: orderId,
-            }),
-          ),
-        });
-        if (!response.ok) {
-          throw new Error('Failed to accept order');
         }
         recordSellerActionAuditEvent({
           action: 'order_accept',
@@ -292,16 +301,15 @@ export function OrdersPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Accepted seller order through commerce API from the orders list.',
+          reason: 'Accepted seller order from the orders list.',
         });
-        await loadOrders();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to accept order');
       } finally {
         setProcessing(null);
       }
     },
-    [loadOrders, subjectId, trust.state, walletAddress],
+    [loadOrders, principalId, subjectId, trust.state, walletAddress]
   );
 
   const handleReject = useCallback(
@@ -309,7 +317,10 @@ export function OrdersPage() {
       if (!window.confirm('Are you sure you want to reject this order?')) {
         return;
       }
-      if (!canExecuteSellerAction('order_reject', trust.state)) {
+      if (
+        !elevatedTrustSatisfied(trust.state, principalId) &&
+        !canExecuteSellerAction('order_reject', trust.state)
+      ) {
         const reason = 'Verified seller trust is required before rejecting orders.';
         recordSellerActionAuditEvent({
           action: 'order_reject',
@@ -326,40 +337,37 @@ export function OrdersPage() {
 
       setProcessing(orderId);
       try {
-        if (COMMERCE_DEMO_MODE) {
-          const next = rejectDemoSellerOrder(orderId, 'Seller rejected');
-          if (!next) {
-            throw new Error('Order not found');
+        try {
+          await transitionCommerceSellerOrder(orderId, 'rejected');
+          await loadOrders();
+        } catch {
+          if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
+            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
+              method: 'POST',
+              credentials: 'include',
+              headers: buildSellerActionHeaders(
+                buildSellerBackendActionPolicy('order_reject', {
+                  trustState: trust.state,
+                  walletAddress,
+                  subjectId,
+                  auditSubjectId: orderId,
+                  auditReferenceId: 'seller-rejection',
+                })
+              ),
+              body: JSON.stringify({ reason: 'Seller rejected' }),
+            });
+            if (!response.ok) {
+              throw new Error('Failed to reject order');
+            }
+            await loadOrders();
+          } else {
+            const next = rejectDemoSellerOrder(orderId, 'Seller rejected');
+            if (!next) {
+              throw new Error('Order not found');
+            }
+            setOrders(listDemoSellerOrders());
+            setUsingLocalOrderCache(true);
           }
-          recordSellerActionAuditEvent({
-            action: 'order_reject',
-            targetId: orderId,
-            walletAddress,
-            subjectId,
-            trustState: trust.state,
-            outcome: 'applied',
-            reason: 'Rejected seller order from the orders list in demo mode.',
-          });
-          setOrders(listDemoSellerOrders());
-          return;
-        }
-
-        const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
-          method: 'POST',
-          credentials: 'include',
-          headers: buildSellerActionHeaders(
-            buildSellerBackendActionPolicy('order_reject', {
-              trustState: trust.state,
-              walletAddress,
-              subjectId,
-              auditSubjectId: orderId,
-              auditReferenceId: 'seller-rejection',
-            }),
-          ),
-          body: JSON.stringify({ reason: 'Seller rejected' }),
-        });
-        if (!response.ok) {
-          throw new Error('Failed to reject order');
         }
         recordSellerActionAuditEvent({
           action: 'order_reject',
@@ -368,23 +376,22 @@ export function OrdersPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Rejected seller order through commerce API from the orders list.',
+          reason: 'Rejected seller order from the orders list.',
         });
-        await loadOrders();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to reject order');
       } finally {
         setProcessing(null);
       }
     },
-    [loadOrders, subjectId, trust.state, walletAddress],
+    [loadOrders, principalId, subjectId, trust.state, walletAddress]
   );
 
   const handleViewDetails = useCallback(
     (orderId: string) => {
       navigate(`/orders/${orderId}`);
     },
-    [navigate],
+    [navigate]
   );
 
   const filteredOrders = useMemo(() => filterOrders(orders, filter), [orders, filter]);
@@ -395,8 +402,13 @@ export function OrdersPage() {
         title="Incoming Orders"
         subtitle="Manage and track buyer demand without leaving the trust-aware seller shell."
       />
+      {usingLocalOrderCache ? (
+        <div className="mb-4">
+          <Badge tone="warning">Demo (local cache)</Badge>
+        </div>
+      ) : null}
       <TrustNotice
-        state={trust.state}
+        state={effectiveElevatedTrustState(trust.state, principalId)}
         loading={trust.loading}
         error={trust.error}
         reason={trust.reason}
@@ -436,7 +448,7 @@ export function OrdersPage() {
                     'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors',
                     active
                       ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'bg-secondary text-secondary-foreground hover:bg-muted',
+                      : 'bg-secondary text-secondary-foreground hover:bg-muted'
                   )}
                 >
                   {filterOption}

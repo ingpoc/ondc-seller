@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useWallet } from '@solana/wallet-adapter-react';
 import { useApi } from '../hooks/useApi';
 import { useTrustState } from '../hooks/useTrustState';
 import { useSubject } from '../hooks/useSubject';
@@ -9,6 +8,7 @@ import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { upsertDemoCatalogItem } from '../lib/mockCatalog';
+import { createAndPublishSellerItem } from '../lib/commerceClient';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
@@ -16,25 +16,19 @@ import {
   buildSellerActionHeaders,
   buildSellerBackendActionPolicy,
 } from '../lib/sellerActionPolicy';
-import {
-  Alert,
-  Button,
-  Card,
-  PageLayout,
-  PageHeader,
-} from '@/components/seller-ui';
+import { Alert, Button, Card, PageLayout, PageHeader } from '@/components/seller-ui';
 import { TrustNotice } from '../components/TrustStatus';
+import { elevatedTrustSatisfied } from '../lib/trust';
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
-  const { publicKey } = useWallet();
-  const { subjectId, walletAddress } = useSubject();
+  const { subjectId, walletAddress, principalId } = useSubject();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isNew = !id;
   const shouldUseAgentDraft = searchParams.get('draft') === 'agent';
   const trust = useTrustState(walletAddress);
-  const trustBlocksCatalog = !trust.loading && trust.state !== 'verified';
+  const trustBlocksCatalog = !trust.loading && !elevatedTrustSatisfied(trust.state, principalId);
 
   const { data: existingProduct, execute } = useApi<BecknItem>(
     isNew ? '/api/catalog' : `/api/catalog/products/${id}`
@@ -84,7 +78,18 @@ export function ProductEditPage() {
         };
 
         if (COMMERCE_DEMO_MODE) {
-          upsertDemoCatalogItem(payload as BecknItem);
+          try {
+            const published = await createAndPublishSellerItem({
+              id: data.id,
+              name: data.name,
+              description: data.description,
+              price: data.price,
+              sellerId: walletAddress,
+            });
+            upsertDemoCatalogItem(published);
+          } catch {
+            upsertDemoCatalogItem(payload as BecknItem);
+          }
           recordSellerActionAuditEvent({
             action: 'catalog_save',
             targetId: data.id,
@@ -92,14 +97,18 @@ export function ProductEditPage() {
             subjectId,
             trustState: trust.state,
             outcome: 'applied',
-            reason: isNew ? 'Created seller catalog item in demo mode.' : 'Updated seller catalog item in demo mode.',
+            reason: isNew
+              ? 'Created seller catalog item in demo mode.'
+              : 'Updated seller catalog item in demo mode.',
           });
-          clearConsumedSellerDraft(isNew ? null : id ?? null);
+          clearConsumedSellerDraft(isNew ? null : (id ?? null));
           navigate('/catalog');
           return;
         }
 
-        const url = isNew ? buildCommerceUrl('/api/catalog/products') : buildCommerceUrl(`/api/catalog/products/${id}`);
+        const url = isNew
+          ? buildCommerceUrl('/api/catalog/products')
+          : buildCommerceUrl(`/api/catalog/products/${id}`);
         const method = isNew ? 'POST' : 'PUT';
 
         const response = await fetch(url, {
@@ -112,7 +121,7 @@ export function ProductEditPage() {
               subjectId,
               auditSubjectId: data.id,
               auditReferenceId: isNew ? 'catalog-create' : id,
-            }),
+            })
           ),
           body: JSON.stringify(payload),
         });
@@ -127,10 +136,12 @@ export function ProductEditPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: isNew ? 'Created seller catalog item through commerce API.' : 'Updated seller catalog item through commerce API.',
+          reason: isNew
+            ? 'Created seller catalog item through commerce API.'
+            : 'Updated seller catalog item through commerce API.',
         });
 
-        clearConsumedSellerDraft(isNew ? null : id ?? null);
+        clearConsumedSellerDraft(isNew ? null : (id ?? null));
         navigate('/catalog');
       } catch (err) {
         recordSellerActionAuditEvent({
@@ -159,9 +170,14 @@ export function ProductEditPage() {
       <PageLayout>
         <PageHeader
           title={isNew ? 'Add New Product' : 'Edit Product'}
-          subtitle="Checking AadhaarChain trust before opening seller write actions."
+          subtitle="Checking trust before opening seller write actions."
         />
-        <TrustNotice state={trust.state} loading={trust.loading} error={trust.error} reason={trust.reason} />
+        <TrustNotice
+          state={trust.state}
+          loading={trust.loading}
+          error={trust.error}
+          reason={trust.reason}
+        />
       </PageLayout>
     );
   }
@@ -171,7 +187,7 @@ export function ProductEditPage() {
       <PageLayout>
         <PageHeader
           title={isNew ? 'Add New Product' : 'Edit Product'}
-          subtitle="Seller catalog writes stay blocked until AadhaarChain trust is verified."
+          subtitle="Seller catalog writes stay blocked until you sign in or trust is verified."
         />
         <div className="space-y-6">
           <TrustNotice
@@ -179,7 +195,6 @@ export function ProductEditPage() {
             loading={trust.loading}
             error={trust.error}
             reason={trust.reason}
-            actionLabel="Resolve trust in AadhaarChain"
           />
           <div className="flex flex-wrap gap-3">
             <Button type="button" variant="secondary" onClick={handleCancel}>

@@ -7,7 +7,12 @@ import { describe, it, expect } from 'vitest';
 import type { UCPOrderStatus } from '@ondc-sdk/shared';
 
 // Import the component to ensure TypeScript compilation
-import { canMutateSellerOrder, OrderDetailPage } from './OrderDetailPage';
+import {
+  canMutateSellerOrder,
+  OrderDetailPage,
+  sellerApprovalNeedsWalletProof,
+  sellerRefundTrustSatisfied,
+} from './OrderDetailPage';
 
 describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
   it('should export OrderDetailPage component', () => {
@@ -44,6 +49,17 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
   });
 
   describe('Seller order trust policy', () => {
+    it('treats the authenticated server principal as verified for AgentGuard refunds', () => {
+      expect(sellerRefundTrustSatisfied('no_identity', 'principal:demo:seller', false)).toBe(true);
+      expect(sellerRefundTrustSatisfied('no_identity', null, false)).toBe(false);
+    });
+
+    it('requires wallet proof only when no server principal owns the session', () => {
+      expect(sellerApprovalNeedsWalletProof('principal:auth0:seller', false)).toBe(false);
+      expect(sellerApprovalNeedsWalletProof(null, false)).toBe(true);
+      expect(sellerApprovalNeedsWalletProof(null, true)).toBe(false);
+    });
+
     it('requires verified trust before order acceptance', () => {
       expect(canMutateSellerOrder('created', 'accept', 'verified')).toBe(true);
       expect(canMutateSellerOrder('created', 'accept', 'manual_review')).toBe(false);

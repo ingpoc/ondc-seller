@@ -59,12 +59,12 @@ describe('ProductEditPage trust gating', () => {
       state: 'no_identity',
       loading: false,
       error: null,
-      reason: 'Create an identity anchor in AadhaarChain before continuing.',
+      reason: 'Sign in before continuing.',
     });
 
     renderPage();
 
-    expect(screen.getByText('Seller catalog writes stay blocked until AadhaarChain trust is verified.')).toBeInTheDocument();
+    expect(screen.getByText('Seller catalog writes stay blocked until you sign in or trust is verified.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Back to catalog' })).toBeInTheDocument();
     expect(screen.queryByText('product form')).not.toBeInTheDocument();
   });

@@ -76,7 +76,7 @@ describe('CatalogPage trust gating', () => {
       state: 'no_identity',
       loading: false,
       error: null,
-      reason: 'Create an identity anchor in AadhaarChain before continuing.',
+      reason: 'Sign in before continuing.',
     });
 
     renderPage();

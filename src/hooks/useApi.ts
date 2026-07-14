@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { getDemoCatalogResponse, findDemoCatalogItem, MOCK_CATALOG_RESPONSE } from '../lib/mockCatalog';
+import { getPublishedCatalogProduct, listPublishedCatalogResponse } from '../lib/commerceClient';
 
 interface UseApiResult<T> {
   data: T | null;
@@ -18,18 +19,37 @@ export function useApi<T>(url: string): UseApiResult<T> {
     setLoading(true);
     setError(null);
     try {
-      if (COMMERCE_DEMO_MODE) {
-        if (url === '/api/catalog') {
-          setData(getDemoCatalogResponse() as T);
+      // Prefer published demo-commerce (BPP source of truth) over local mockCatalog.
+      if (url === '/api/catalog') {
+        try {
+          setData((await listPublishedCatalogResponse()) as T);
           return;
+        } catch {
+          if (COMMERCE_DEMO_MODE) {
+            setData({ ...getDemoCatalogResponse(), __source: 'local' } as T);
+            return;
+          }
+          throw new Error('Published catalog unavailable');
         }
+      }
 
-        if (url.startsWith('/api/catalog/products/')) {
-          const id = url.split('/').pop();
-          const item = id ? findDemoCatalogItem(id) : null;
+      if (url.startsWith('/api/catalog/products/')) {
+        const id = url.split('/').pop();
+        try {
+          const item = id ? await getPublishedCatalogProduct(id) : null;
           setData(item as T);
           return;
+        } catch {
+          if (COMMERCE_DEMO_MODE) {
+            setData((id ? findDemoCatalogItem(id) : null) as T);
+            return;
+          }
+          throw new Error('Catalog product unavailable');
         }
+      }
+
+      if (COMMERCE_DEMO_MODE) {
+        // Remaining demo endpoints may still use mock fixtures.
       }
 
       const response = await fetch(buildCommerceUrl(url), {
@@ -41,7 +61,7 @@ export function useApi<T>(url: string): UseApiResult<T> {
       const result = await response.json();
       setData(result);
     } catch (err) {
-      if (url === '/api/catalog') {
+      if (url === '/api/catalog' && COMMERCE_DEMO_MODE) {
         setData(MOCK_CATALOG_RESPONSE as T);
         setError(null);
       } else {

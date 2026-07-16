@@ -231,13 +231,13 @@ export function CatalogPage() {
           <StatCard
             label="Categories covered"
             value={categoryCount}
-            hint="Broader spread helps discovery across buyer intents"
+            hint="More categories help buyers discover your products"
             tone="info"
           />
           <StatCard
             label="Image coverage"
             value={imageryCount}
-            hint="Listings with imagery read better in buyer result cards"
+            hint="Product images help buyers recognize your listings"
             tone={
               imageryCount === filteredItems.length && filteredItems.length > 0
                 ? 'success'
@@ -278,9 +278,9 @@ export function CatalogPage() {
         <>
           <Section
             className="mt-10"
-            eyebrow="Featured review"
-            title="Spot-check the top listings"
-            description="These cards mimic how the catalog reads at a glance before buyers drill into edit flows."
+            eyebrow="Featured products"
+            title="Review published listings"
+            description="Check how each product will appear to buyers."
             actions={query ? <Badge tone="info">{filteredItems.length} matches</Badge> : null}
           >
             {featuredItems.length === 0 ? (
@@ -377,9 +377,9 @@ export function CatalogPage() {
 
           <Section
             className="mt-10"
-            eyebrow="Inventory ledger"
-            title="Edit every SKU from one table"
-            description="Use the table for precise edits once the top-level card view confirms the shelf is headed in the right direction."
+            eyebrow="Product details"
+            title="Update products in one table"
+            description="Use this table to update prices, stock, and product details."
           >
             <InventoryTable
               items={filteredItems}

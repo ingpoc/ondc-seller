@@ -41,11 +41,11 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/agentguard', label: 'AgentGuard' },
+  { href: '/agentguard', label: 'Business controls' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/catalog', label: 'Catalog' },
   { href: '/orders', label: 'Orders' },
-  { href: '/config', label: 'Config' },
+  { href: '/config', label: 'Settings' },
 ];
 
 const SECONDARY_NAV_ITEMS: NavItem[] = [
@@ -362,7 +362,7 @@ function HeaderBar() {
             ONDC Seller
           </Link>
           <div className="hidden text-xs text-muted-foreground sm:block">
-            Sell on the ONDC network under AgentGuard
+            Manage products and orders across the ONDC network
           </div>
         </div>
 
@@ -387,25 +387,29 @@ function HeaderBar() {
             className={cn(activeControl === 'search' ? 'w-[20rem]' : 'w-auto')}
           />
 
-          <HeaderControlTile
-            icon={Bot}
-            label={`Runtime ${runtimeMeta.label}`}
-            detail={runtimeMeta.detail}
-            expanded={activeControl === 'runtime'}
-            onExpand={() => setActiveControl('runtime')}
-            className={runtimeMeta.className}
-            ariaLabel="Open runtime status"
-          />
+          {isAuthenticated ? (
+            <>
+              <HeaderControlTile
+                icon={Bot}
+                label={`Assistant ${runtimeMeta.label}`}
+                detail={runtimeMeta.detail}
+                expanded={activeControl === 'runtime'}
+                onExpand={() => setActiveControl('runtime')}
+                className={runtimeMeta.className}
+                ariaLabel="Open assistant status"
+              />
 
-          <HeaderControlTile
-            icon={trustMeta.icon}
-            label={`Trust ${trustMeta.label}`}
-            detail={trustMeta.detail}
-            expanded={activeControl === 'trust'}
-            onExpand={() => setActiveControl('trust')}
-            className={trustMeta.className}
-            ariaLabel="Open trust status"
-          />
+              <HeaderControlTile
+                icon={trustMeta.icon}
+                label={`Access ${trustMeta.label}`}
+                detail={trustMeta.detail}
+                expanded={activeControl === 'trust'}
+                onExpand={() => setActiveControl('trust')}
+                className={trustMeta.className}
+                ariaLabel="Open account access status"
+              />
+            </>
+          ) : null}
 
           {IDENTITY_AUTH_ENABLED && !authLoading ? (
             isAuthenticated ? (
@@ -502,7 +506,7 @@ function HeaderBar() {
               <SheetHeader>
                 <SheetTitle>Seller navigation</SheetTitle>
                 <SheetDescription>
-                  Move between catalog, orders, config, and agent workflows.
+                  Move between products, orders, settings, and seller tools.
                 </SheetDescription>
               </SheetHeader>
               <div className="flex flex-col gap-3 px-6 pb-6">
@@ -537,18 +541,20 @@ function HeaderBar() {
                   setMobileOpen(false);
                 }} expanded onCollapse={() => setMobileOpen(false)} />
 
+                {isAuthenticated ? (
                 <div className="flex flex-col gap-2">
                   <div className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', runtimeMeta.className)}>
                     <Bot className="size-4" />
-                    <span>Runtime {runtimeMeta.label}</span>
+                    <span>Assistant {runtimeMeta.label}</span>
                   </div>
                   <a
                             className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', trustMeta.className)}
                   >
                     <TrustIcon className="size-4" />
-                    <span>Trust {trustMeta.label}</span>
+                    <span>Access {trustMeta.label}</span>
                   </a>
                 </div>
+                ) : null}
               </div>
             </SheetContent>
           </Sheet>

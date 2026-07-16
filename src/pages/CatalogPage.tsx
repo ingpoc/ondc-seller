@@ -190,13 +190,13 @@ export function CatalogPage() {
   );
 
   return (
-    <PageLayout>
+    <PageLayout
+      title={query ? `Catalog matches for “${searchParams.get('q')}”` : 'Product catalog'}
+      subtitle="Review what buyers can find, then update the product that needs attention."
+      showHeader
+    >
       <Section
         eyebrow="Seller catalog"
-        title={
-          query ? `Catalog matches for “${searchParams.get('q')}”` : 'Run a tighter product shelf'
-        }
-        description="Review the inventory buyers will actually encounter, then edit the exact SKU that needs cleanup."
         actions={
           <div className="flex flex-wrap gap-3">
             {usingLocalCatalogCache ? <Badge tone="warning">Local cache</Badge> : null}
@@ -225,7 +225,7 @@ export function CatalogPage() {
             hint={
               query
                 ? `${items.length} total products in the full catalog`
-                : 'Active SKUs in the current view'
+                : 'Published products in the current view'
             }
           />
           <StatCard
@@ -245,9 +245,9 @@ export function CatalogPage() {
             }
           />
           <StatCard
-            label="Trust control"
-            value={trust.loading ? 'Checking' : !trustBlocksCatalog ? 'Open' : 'Restricted'}
-            hint={trust.reason ?? 'Catalog edits stay gated until sign-in or trust is verified'}
+            label="Edit access"
+            value={trust.loading ? 'Checking' : !trustBlocksCatalog ? 'Ready' : 'Sign in needed'}
+            hint={trust.reason ?? 'Sign in to add or edit products'}
             tone={!trustBlocksCatalog ? 'success' : 'warning'}
           />
         </div>

@@ -50,7 +50,7 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
       return {
         label: 'Sign in required',
         description:
-          'Sign in before elevated seller actions.',
+          'Sign in before adding products or changing orders.',
         className: 'bg-secondary text-secondary-foreground',
         icon: ShieldAlert,
       };

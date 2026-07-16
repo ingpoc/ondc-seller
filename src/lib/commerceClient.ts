@@ -1,6 +1,7 @@
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 import type { BecknItem } from '../types';
 import { TRUST_API_URL } from './identityUrls';
+import { isLocalBrowserHost } from './loopback';
 
 export interface DemoCommerceItem {
   item_id: string;
@@ -43,7 +44,8 @@ interface ApiEnvelope<T> {
 }
 
 async function demoFetch<T>(endpoint: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${TRUST_API_URL}${endpoint}`, {
+  const base = isLocalBrowserHost() ? TRUST_API_URL : '';
+  const response = await fetch(`${base}${endpoint}`, {
     ...init,
     credentials: 'include',
     headers: {
@@ -53,7 +55,7 @@ async function demoFetch<T>(endpoint: string, init: RequestInit = {}): Promise<T
   });
   const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T>>;
   if (!response.ok || body.success === false) {
-    throw new Error(body.detail || body.message || `Demo commerce request failed (${response.status})`);
+    throw new Error(body.detail || body.message || `Commerce request failed (${response.status})`);
   }
   return body.data as T;
 }

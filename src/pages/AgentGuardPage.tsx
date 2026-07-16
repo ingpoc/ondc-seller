@@ -32,7 +32,7 @@ const SELLER_ACTION_OPTIONS: { id: string; label: string }[] = [
   { id: 'seller.inventory.commit', label: 'Commit inventory' },
   { id: 'seller.order.accept', label: 'Accept orders' },
   { id: 'seller.order.reject', label: 'Reject orders' },
-  { id: 'seller.fulfillment.commit', label: 'Fulfilment' },
+  { id: 'seller.fulfilment.commit', label: 'Fulfilment' },
   { id: 'seller.remedy.promise', label: 'Promise remedy' },
   { id: 'seller.refund.issue', label: 'Issue refund' },
 ];

@@ -26,6 +26,7 @@ import {
 } from '../lib/sellerActionPolicy';
 
 type CatalogItem = BecknItem & {
+  quantity?: number;
   descriptor?: BecknItem['descriptor'] & {
     short_desc?: string;
   };
@@ -150,7 +151,7 @@ export function CatalogPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Deleted seller catalog item in demo mode.',
+          reason: 'Deleted seller catalog item locally.',
         });
         await execute();
         return;
@@ -198,7 +199,7 @@ export function CatalogPage() {
         description="Review the inventory buyers will actually encounter, then edit the exact SKU that needs cleanup."
         actions={
           <div className="flex flex-wrap gap-3">
-            {usingLocalCatalogCache ? <Badge tone="warning">Demo (local cache)</Badge> : null}
+            {usingLocalCatalogCache ? <Badge tone="warning">Local cache</Badge> : null}
             <Button type="button" variant="secondary" onClick={() => void execute()}>
               Refresh catalog
             </Button>
@@ -336,12 +337,22 @@ export function CatalogPage() {
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <div>
+                        <div className="flex gap-8">
+                          <div>
                           <div className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
                             Price
                           </div>
                           <div className="mt-1 text-lg font-bold tracking-[-0.03em] text-[var(--ui-text)]">
                             {item.price?.currency ?? 'INR'} {item.price?.value ?? '0'}
+                          </div>
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
+                              Stock
+                            </div>
+                            <div className="mt-1 text-lg font-bold tracking-[-0.03em] text-[var(--ui-text)]">
+                              {item.quantity ?? 0}
+                            </div>
                           </div>
                         </div>
                         <Button

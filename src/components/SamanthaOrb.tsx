@@ -5,6 +5,7 @@ import { SELLER_TOOL_DEFINITIONS, runSellerTool, type SellerToolName } from '../
 import { extractRealtimeToolCalls } from '../lib/realtimeToolCalls';
 import { formatMemoryForPrompt, loadSamanthaMemory } from '../lib/samanthaMemory';
 import { subscribeSellerRuntimeJob } from '../lib/samanthaRuntimeHandoff';
+import { createSamanthaSessionId, persistSamanthaEvent } from '../lib/samanthaTranscript';
 import { useSubject } from '../hooks';
 import { cn } from '../lib/utils';
 
@@ -14,10 +15,11 @@ const SELLER_ORB_INSTRUCTIONS =
   'Greetings or chitchat: reply briefly with no tools. Do not volunteer work they did not ask for. ' +
   'Actionable short asks: choose and call the right tool(s). Chain several short tools in one turn when one request needs multiple steps. ' +
   'Continue after each function_call_output until the short request is done. Never claim an action without a successful tool call. ' +
+  'Order actions: use accept_order or reject_order for a paid order, and mark_order_fulfilled after acceptance. Omit order_id when the user means the newest eligible order. ' +
   'Long or multi-step ops: call delegate_to_runtime_agent once. When it returns started, say you started and will let them know when done — ' +
   'never mention another agent, Cursor, or /agent. Never claim longer work finished unless a later update says so. ' +
   'Never invent work the user did not ask for. Report AgentGuard allow / need_approval / deny honestly. Do not send users to /agent. ' +
-  'Short tools: navigate_to, catalog_publish, refund_issue, remember_preference.';
+  'Short tools: navigate_to, catalog_publish, accept_order, reject_order, mark_order_fulfilled, refund_issue, remember_preference.';
 
 type OrbState = 'idle' | 'connecting' | 'listening' | 'error';
 
@@ -34,6 +36,15 @@ function replyForDisplay(text: string): string {
     .replace(/\s*\|\s*/g, ' · ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function markSamanthaTurn(inFlight: boolean, phase: string): void {
+  if (typeof window === 'undefined') return;
+  (window as Window & { __samanthaTurn?: Record<string, unknown> }).__samanthaTurn = {
+    in_flight: inFlight,
+    phase,
+    at: Date.now(),
+  };
 }
 
 function createSilentAudioTrack(): MediaStreamTrack {
@@ -67,7 +78,14 @@ export function SamanthaOrb() {
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const handledCallsRef = useRef<Set<string>>(new Set());
+  const turnToolCallCountRef = useRef(0);
+  const responseActiveRef = useRef(false);
+  const toolFollowupRequestedRef = useRef(false);
+  const toolFollowupSentRef = useRef(false);
   const replyBufRef = useRef('');
+  const transcriptSessionIdRef = useRef(createSamanthaSessionId('seller'));
+  const lastPersistedReplyRef = useRef('');
+  const startInFlightRef = useRef(false);
   /** Queued while connecting — flushed when Realtime is listening. */
   const pendingTextRef = useRef<string | null>(null);
 
@@ -163,12 +181,19 @@ export function SamanthaOrb() {
     async (name: string, callId: string, argsJson: string) => {
       if (handledCallsRef.current.has(callId)) return;
       handledCallsRef.current.add(callId);
+      turnToolCallCountRef.current += 1;
+      markSamanthaTurn(true, `tool:${name}`);
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(argsJson || '{}') as Record<string, unknown>;
       } catch {
         args = {};
       }
+      void persistSamanthaEvent({
+        role: 'seller', sessionId: transcriptSessionIdRef.current,
+        eventType: 'tool_call', content: name,
+        metadata: { call_id: callId, arguments: args },
+      }).catch(() => undefined);
       const result = await runSellerTool(name as SellerToolName, args, {
         walletAddress: walletAddress || '',
         subjectId: subjectId || '',
@@ -180,17 +205,29 @@ export function SamanthaOrb() {
           __samanthaTools?: Array<Record<string, unknown>>;
         };
         w.__samanthaTools = w.__samanthaTools || [];
-        w.__samanthaTools.push({
+          w.__samanthaTools.push({
           at: Date.now(),
           name,
           callId,
           ok: result.ok,
-          message: result.message,
-          navigateTo: result.navigateTo ?? null,
-        });
+            message: result.message,
+            navigateTo: result.navigateTo ?? null,
+            decision: result.decision ?? null,
+            receiptId: result.receiptId ?? null,
+            data: result.data ?? null,
+          });
       } catch {
         /* ignore */
       }
+      void persistSamanthaEvent({
+        role: 'seller', sessionId: transcriptSessionIdRef.current,
+        eventType: 'tool_result', content: result.message,
+        metadata: {
+          call_id: callId, tool: name, ok: result.ok,
+          navigate_to: result.navigateTo, decision: result.decision,
+          receipt_id: result.receiptId, data: result.data,
+        },
+      }).catch(() => undefined);
       if (result.navigateTo) navigate(result.navigateTo);
       const dc = dcRef.current;
       if (!dc || dc.readyState !== 'open') return;
@@ -212,7 +249,15 @@ export function SamanthaOrb() {
           },
         })
       );
-      dc.send(JSON.stringify({ type: 'response.create' }));
+      toolFollowupRequestedRef.current = true;
+      if (!responseActiveRef.current && !toolFollowupSentRef.current) {
+        toolFollowupSentRef.current = true;
+        responseActiveRef.current = true;
+        dc.send(JSON.stringify({ type: 'response.create' }));
+        markSamanthaTurn(true, 'tool_followup');
+      } else {
+        markSamanthaTurn(true, 'tool_followup_wait');
+      }
     },
     [navigate, subjectId, walletAddress]
   );
@@ -222,7 +267,16 @@ export function SamanthaOrb() {
     pcRef.current = null;
     dcRef.current = null;
     handledCallsRef.current.clear();
+    turnToolCallCountRef.current = 0;
+    responseActiveRef.current = false;
+    toolFollowupRequestedRef.current = false;
+    toolFollowupSentRef.current = false;
+    markSamanthaTurn(false, 'stopped');
     replyBufRef.current = '';
+    void persistSamanthaEvent({
+      role: 'seller', sessionId: transcriptSessionIdRef.current,
+      eventType: 'session_stopped',
+    }).catch(() => undefined);
     if (audioRef.current) {
       audioRef.current.srcObject = null;
     }
@@ -257,6 +311,7 @@ export function SamanthaOrb() {
         audio: {
           input: {
             turn_detection: usedMic ? { type: 'semantic_vad' } : null,
+            transcription: usedMic ? { model: 'gpt-4o-mini-transcribe' } : null,
           },
         },
       };
@@ -292,9 +347,21 @@ export function SamanthaOrb() {
         if (msg.type === 'session.updated') {
           setState('listening');
           setHint(usedMic ? 'Listening + text ready' : 'Text mode ready (no mic)');
+          void persistSamanthaEvent({
+            role: 'seller', sessionId: transcriptSessionIdRef.current,
+            eventType: 'session_started', metadata: { mode: usedMic ? 'voice' : 'text', model },
+          }).catch(() => undefined);
           const pending = pendingTextRef.current;
           if (pending && dc.readyState === 'open') {
             pendingTextRef.current = null;
+            turnToolCallCountRef.current = 0;
+            toolFollowupRequestedRef.current = false;
+            toolFollowupSentRef.current = false;
+            markSamanthaTurn(true, 'user_text');
+            void persistSamanthaEvent({
+              role: 'seller', sessionId: transcriptSessionIdRef.current,
+              eventType: 'user_text', content: pending,
+            }).catch(() => undefined);
             replyBufRef.current = '';
             setReply('');
             setDraft('');
@@ -308,21 +375,38 @@ export function SamanthaOrb() {
                 },
               })
             );
+            responseActiveRef.current = true;
             dc.send(JSON.stringify({ type: 'response.create' }));
             setHint('Samantha is thinking…');
           }
         }
         if (msg.type === 'error') {
+          responseActiveRef.current = false;
           const detail = msg.error?.message || msg.message || msg.error?.code || 'session error';
           setState('error');
           setHint(`Samantha error: ${String(detail).slice(0, 160)}`);
+          markSamanthaTurn(false, 'error');
+          void persistSamanthaEvent({
+            role: 'seller', sessionId: transcriptSessionIdRef.current,
+            eventType: 'error', content: String(detail).slice(0, 4_000),
+          }).catch(() => undefined);
         }
-        if (
-          msg.type === 'response.created' &&
-          replyBufRef.current &&
-          !/\s$/.test(replyBufRef.current)
-        ) {
-          replyBufRef.current += ' ';
+        if (msg.type === 'conversation.item.input_audio_transcription.completed') {
+          const transcript = String(msg.transcript || msg.text || '').trim();
+          if (transcript) {
+            void persistSamanthaEvent({
+              role: 'seller', sessionId: transcriptSessionIdRef.current,
+              eventType: 'user_voice_transcript', content: transcript,
+            }).catch(() => undefined);
+          }
+        }
+        if (msg.type === 'response.created') {
+          responseActiveRef.current = true;
+          toolFollowupRequestedRef.current = false;
+          toolFollowupSentRef.current = false;
+          if (replyBufRef.current && !/\s$/.test(replyBufRef.current)) {
+            replyBufRef.current += ' ';
+          }
         }
         if (
           msg.type === 'response.output_audio_transcript.delta' ||
@@ -332,14 +416,27 @@ export function SamanthaOrb() {
         ) {
           appendReply(String(msg.delta || msg.transcript || msg.text || ''));
         }
-        if (
-          msg.type === 'response.output_audio_transcript.done' ||
-          msg.type === 'response.audio_transcript.done' ||
-          msg.type === 'response.done'
-        ) {
+        if (msg.type === 'response.done') {
+          responseActiveRef.current = false;
+          if (toolFollowupRequestedRef.current && !toolFollowupSentRef.current) {
+            toolFollowupSentRef.current = true;
+            responseActiveRef.current = true;
+            dc.send(JSON.stringify({ type: 'response.create' }));
+            markSamanthaTurn(true, 'tool_followup');
+          } else {
+            markSamanthaTurn(false, 'response_done');
+          }
           // Do not clobber tool result hints.
-          if (replyBufRef.current.trim() && handledCallsRef.current.size === 0) {
+          if (replyBufRef.current.trim() && turnToolCallCountRef.current === 0) {
             setHint('Samantha replied');
+          }
+          const finalReply = replyBufRef.current.trim();
+          if (finalReply && finalReply !== lastPersistedReplyRef.current) {
+            lastPersistedReplyRef.current = finalReply;
+            void persistSamanthaEvent({
+              role: 'seller', sessionId: transcriptSessionIdRef.current,
+              eventType: 'assistant_text', content: finalReply,
+            }).catch(() => undefined);
           }
         }
         const calls = extractRealtimeToolCalls(msg);
@@ -356,7 +453,16 @@ export function SamanthaOrb() {
   }
 
   async function startSession() {
-    if (state === 'listening' || state === 'connecting') return;
+    if (startInFlightRef.current || state === 'listening' || state === 'connecting') return;
+    startInFlightRef.current = true;
+    try {
+      await startSessionConnection();
+    } finally {
+      startInFlightRef.current = false;
+    }
+  }
+
+  async function startSessionConnection() {
     setState('connecting');
     setHint('Connecting Samantha…');
     // Re-probe on open: avoids false "not configured" while status is still loading
@@ -369,6 +475,13 @@ export function SamanthaOrb() {
     }
     setReply('');
     replyBufRef.current = '';
+    transcriptSessionIdRef.current = createSamanthaSessionId('seller');
+    lastPersistedReplyRef.current = '';
+    turnToolCallCountRef.current = 0;
+    responseActiveRef.current = false;
+    toolFollowupRequestedRef.current = false;
+    toolFollowupSentRef.current = false;
+    markSamanthaTurn(false, 'connecting_session');
     const memory = loadSamanthaMemory(subjectId);
     const secretRes = await fetch(`${TRUST_API_URL}/api/realtime/client-secret`, {
       method: 'POST',
@@ -478,6 +591,14 @@ export function SamanthaOrb() {
       return;
     }
     replyBufRef.current = '';
+    turnToolCallCountRef.current = 0;
+    toolFollowupRequestedRef.current = false;
+    toolFollowupSentRef.current = false;
+    markSamanthaTurn(true, 'user_text');
+    void persistSamanthaEvent({
+      role: 'seller', sessionId: transcriptSessionIdRef.current,
+      eventType: 'user_text', content: text,
+    }).catch(() => undefined);
     setReply('');
     pendingTextRef.current = null;
     dc.send(
@@ -490,6 +611,7 @@ export function SamanthaOrb() {
         },
       })
     );
+    responseActiveRef.current = true;
     dc.send(JSON.stringify({ type: 'response.create' }));
     setDraft('');
     setHint('Samantha is thinking…');
@@ -534,9 +656,10 @@ export function SamanthaOrb() {
           <form className="mt-3 flex gap-2" onSubmit={sendText}>
             <input
               type="text"
+              aria-label="Ask Samantha"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={state === 'connecting' ? 'Type while Samantha connects' : 'Ask Samantha'}
+              placeholder="Ask Samantha"
               data-testid="samantha-orb-text"
               className="min-w-0 flex-1 rounded-full border border-border bg-background px-3 py-2 text-xs outline-none transition focus:ring-2 focus:ring-ring/40"
             />
@@ -564,7 +687,7 @@ export function SamanthaOrb() {
         data-testid="samantha-orb"
         onClick={toggle}
         className={cn(
-          'pointer-events-auto flex size-14 items-center justify-center rounded-full text-sm font-semibold transition duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+          'pointer-events-auto flex h-12 items-center justify-center rounded-full px-4 text-sm font-semibold transition duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
           state === 'listening' &&
             'bg-primary text-primary-foreground shadow-[0_8px_24px_oklch(0.48_0.07_195_/_0.35)] ring-2 ring-primary/30',
           state === 'connecting' && 'bg-secondary text-foreground ring-2 ring-border',
@@ -573,7 +696,7 @@ export function SamanthaOrb() {
             'bg-primary text-primary-foreground shadow-[0_8px_24px_oklch(0.48_0.07_195_/_0.28)] hover:scale-105 active:scale-[0.98]'
         )}
       >
-        S
+        Samantha
       </button>
     </div>
   );

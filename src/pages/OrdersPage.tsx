@@ -464,7 +464,7 @@ export function OrdersPage() {
               title={filter === 'all' ? 'No incoming orders yet' : `No ${filter} orders`}
               description={
                 filter === 'all'
-                  ? 'Orders will appear here once live or demo buyer traffic reaches the seller queue.'
+                  ? 'Orders will appear here once buyers place them through the ONDC network.'
                   : `There are no ${filter} orders in the queue right now.`
               }
             />

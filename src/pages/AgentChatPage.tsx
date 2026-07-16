@@ -491,18 +491,17 @@ export function AgentChatPage(): JSX.Element {
   return (
     <PageLayout>
       <PageHeader
-        title="Seller Agent Operations Cockpit"
-        subtitle="Run catalog review, draft listing updates, and seller ops triage from a trust-aware Cursor control surface."
+        title="Ask Samantha"
+        subtitle="Review your catalog, prepare listing updates, and manage seller operations under AgentGuard."
       />
       <div className="space-y-6">
         <div className="flex flex-wrap gap-2">
           <Badge tone={runtime.runtime_available ? 'success' : 'warning'}>
-            Runtime {runtime.auth_mode}
+            {runtime.runtime_available ? 'Samantha ready' : 'Samantha unavailable'}
           </Badge>
           <Badge tone={trust.state === 'verified' ? 'success' : 'warning'}>
             {trust.state === 'verified' ? 'Verified seller writes enabled' : 'Read-only seller guidance'}
           </Badge>
-          <Badge tone="info">{runtime.model}</Badge>
           <Badge tone="info">{usageLabel}</Badge>
         </div>
 
@@ -517,11 +516,8 @@ export function AgentChatPage(): JSX.Element {
         {subjectId && !runtime.runtime_available ? (
           <Alert
             tone="warning"
-            title="Cursor runtime unavailable"
-            description={
-              runtime.blocked_reason ??
-              'Set CURSOR_API_KEY on the FlatWatch backend (:43104) and restart the dev stack.'
-            }
+            title="Samantha is temporarily unavailable"
+            description="Please try again after the service reconnects."
           />
         ) : null}
 

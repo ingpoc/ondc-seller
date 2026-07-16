@@ -48,7 +48,7 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
       };
     default:
       return {
-        label: 'Unsigned',
+        label: 'Sign in required',
         description:
           'Sign in before elevated seller actions.',
         className: 'bg-secondary text-secondary-foreground',
@@ -103,7 +103,7 @@ export function TrustNotice({
             <Icon className="size-4" />
           </div>
           <div className="space-y-2">
-            <Badge className={meta.className}>Trust check: {meta.label}</Badge>
+            <Badge className={meta.className}>Access: {meta.label}</Badge>
             <p className="max-w-3xl text-sm text-muted-foreground">
               {error || reason || meta.description}
             </p>

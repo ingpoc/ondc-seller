@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { coerceSellerNavPath, runSellerTool } from './agentTools';
+import { coerceSellerNavPath, runSellerTool, sellerToolsForMandate } from './agentTools';
 
 vi.mock('./commerceClient', () => ({
   createAndPublishSellerItem: vi.fn(async (input: { name: string; id: string }) => ({
@@ -60,6 +60,112 @@ describe('seller agent tools', () => {
       'preference',
       'brief refund confirmations',
     );
+  });
+
+  it('offers order tools only for their canonical AgentGuard actions', () => {
+    expect(
+      sellerToolsForMandate([
+        'seller.order.accept',
+        'seller.order.reject',
+        'seller.fulfilment.commit',
+      ]),
+    ).toEqual(
+      expect.arrayContaining(['accept_order', 'reject_order', 'mark_order_fulfilled']),
+    );
+    expect(sellerToolsForMandate(['seller.fulfillment.commit'])).not.toContain(
+      'mark_order_fulfilled',
+    );
+  });
+
+  it('accept_order resolves the newest paid order and executes through AgentGuard', async () => {
+    const { listCommerceSellerOrders } = await import('./commerceClient');
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
+      { id: 'older-paid', status: 'created', updatedAt: '2026-07-12T10:00:00Z' },
+      { id: 'newer-paid', status: 'created', updatedAt: '2026-07-14T10:00:00Z' },
+      { id: 'already-accepted', status: 'accepted', updatedAt: '2026-07-15T10:00:00Z' },
+    ] as never);
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'allow',
+      receipt: { receipt_id: 'rcpt_accept' } as never,
+    });
+
+    const result = await runSellerTool('accept_order', {}, { subjectId: 'principal:demo:s' });
+
+    expect(result.ok).toBe(true);
+    expect(result.navigateTo).toBe('/orders/newer-paid');
+    expect(executeProtectedAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'seller.order.accept',
+        resourceId: 'newer-paid',
+        payload: { order_id: 'newer-paid' },
+      }),
+    );
+  });
+
+  it('reject_order uses an explicit order id and reports AgentGuard denial honestly', async () => {
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'deny',
+      receipt: undefined,
+    });
+
+    const result = await runSellerTool(
+      'reject_order',
+      { order_id: 'paid-2' },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/denied by AgentGuard/i);
+    expect(executeProtectedAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'seller.order.reject', resourceId: 'paid-2' }),
+    );
+  });
+
+  it('mark_order_fulfilled resolves the newest accepted order', async () => {
+    const { listCommerceSellerOrders } = await import('./commerceClient');
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
+      { id: 'paid', status: 'created', updatedAt: '2026-07-15T12:00:00Z' },
+      { id: 'accepted', status: 'accepted', updatedAt: '2026-07-15T11:00:00Z' },
+    ] as never);
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'allow',
+      receipt: { receipt_id: 'rcpt_fulfilled' } as never,
+    });
+
+    const result = await runSellerTool(
+      'mark_order_fulfilled',
+      {},
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.navigateTo).toBe('/orders/accepted');
+    expect(executeProtectedAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'seller.fulfilment.commit',
+        resourceId: 'accepted',
+      }),
+    );
+  });
+
+  it('order actions fail clearly when no eligible order exists', async () => {
+    const { listCommerceSellerOrders } = await import('./commerceClient');
+    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
+      { id: 'already-done', status: 'delivered', updatedAt: '2026-07-15T10:00:00Z' },
+    ] as never);
+
+    const result = await runSellerTool(
+      'mark_order_fulfilled',
+      {},
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/no accepted seller order/i);
+    expect(result.navigateTo).toBe('/orders');
   });
 
   it('refund_issue reports AgentGuard need_approval', async () => {

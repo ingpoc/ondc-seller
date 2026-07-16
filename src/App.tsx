@@ -120,7 +120,7 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
       };
     default:
       return {
-        label: 'Unsigned',
+        label: 'Sign in required',
         detail: 'Sign in before elevated seller actions.',
         className: 'bg-secondary text-secondary-foreground',
         icon: ShieldAlert,
@@ -322,7 +322,7 @@ function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { walletAddress, subjectId } = useSubject();
-  const { isAuthenticated, loading: authLoading, loginAuth0, loginDemo, loginGoogle, logout } =
+  const { isAuthenticated, loading: authLoading, loginAuth0, loginGoogle, logout } =
     useAuthContext();
   const authProviders = useAuthProviders();
   const trust = useTrustState(walletAddress);
@@ -331,6 +331,9 @@ function HeaderBar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const controlsRef = useRef<HTMLDivElement | null>(null);
   const activePath = getActivePath(location.pathname);
+  const visibleSecondaryNavItems = isAuthenticated
+    ? SECONDARY_NAV_ITEMS
+    : SECONDARY_NAV_ITEMS.filter((item) => item.href !== '/agent');
   const trustMeta = getTrustMeta(trust.state, trust.loading);
   const runtimeMeta = getRuntimeMeta(runtime);
   const TrustIcon = trustMeta.icon;
@@ -359,7 +362,7 @@ function HeaderBar() {
             ONDC Seller
           </Link>
           <div className="hidden text-xs text-muted-foreground sm:block">
-            Catalog under AgentGuard authority
+            Sell on the ONDC network under AgentGuard
           </div>
         </div>
 
@@ -437,21 +440,9 @@ function HeaderBar() {
                     Google
                   </Button>
                 ) : null}
-                {authProviders.demo_continue ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => loginDemo(location.pathname)}
-                  >
-                    Booth
-                  </Button>
-                ) : null}
                 {!authProviders.loading &&
                 !authProviders.auth0 &&
-                !authProviders.google &&
-                !authProviders.demo_continue ? (
+                !authProviders.google ? (
                   <span className="text-xs text-muted-foreground">Sign-in not configured</span>
                 ) : null}
               </div>
@@ -493,21 +484,9 @@ function HeaderBar() {
                     Google
                   </Button>
                 ) : null}
-                {authProviders.demo_continue ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => loginDemo(location.pathname)}
-                  >
-                    Booth
-                  </Button>
-                ) : null}
                 {!authProviders.loading &&
                 !authProviders.auth0 &&
-                !authProviders.google &&
-                !authProviders.demo_continue ? (
+                !authProviders.google ? (
                   <span className="text-xs text-muted-foreground">Sign-in not configured</span>
                 ) : null}
               </div>
@@ -541,7 +520,7 @@ function HeaderBar() {
                 </div>
 
                 <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-                  {SECONDARY_NAV_ITEMS.map((item) => (
+                  {visibleSecondaryNavItems.map((item) => (
                     <NavigationLink
                       key={item.href}
                       href={item.href}
@@ -581,7 +560,15 @@ function HeaderBar() {
 
 export function App() {
   const location = useLocation();
+  const { isAuthenticated } = useAuthContext();
   const activePath = getActivePath(location.pathname);
+  const visibleSecondaryNavItems = isAuthenticated
+    ? SECONDARY_NAV_ITEMS
+    : SECONDARY_NAV_ITEMS.filter((item) => item.href !== '/agent');
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen">
@@ -597,12 +584,15 @@ export function App() {
           <Route path="/orders/:id" element={<OrderDetailPage />} />
           <Route path="/agentguard" element={<AgentGuardPage />} />
           <Route path="/config" element={<ConfigPage />} />
-          <Route path="/agent" element={<AgentChatPage />} />
+          <Route
+            path="/agent"
+            element={isAuthenticated ? <AgentChatPage /> : <Navigate to="/dashboard" replace />}
+          />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
       <footer className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-3 border-t border-border/60 px-4 py-6 text-sm text-muted-foreground sm:px-6">
-        {SECONDARY_NAV_ITEMS.map((item) => (
+        {visibleSecondaryNavItems.map((item) => (
           <NavigationLink
             key={item.href}
             href={item.href}
@@ -612,7 +602,7 @@ export function App() {
           />
         ))}
       </footer>
-      <SamanthaOrb />
+      {isAuthenticated ? <SamanthaOrb /> : null}
     </div>
   );
 }

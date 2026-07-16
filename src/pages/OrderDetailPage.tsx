@@ -240,7 +240,7 @@ export function OrderDetailPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Accepted seller order in demo mode.',
+          reason: 'Accepted seller order locally.',
         });
         setOrder(next);
         return;
@@ -306,7 +306,7 @@ export function OrderDetailPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Rejected seller order in demo mode.',
+          reason: 'Rejected seller order locally.',
         });
         setOrder(next);
         return;
@@ -375,7 +375,7 @@ export function OrderDetailPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Dispatched seller order in demo mode.',
+          reason: 'Dispatched seller order locally.',
         });
         setOrder(next);
         return;
@@ -687,7 +687,7 @@ export function OrderDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Demo: INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR 5,000.
+            INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR 5,000.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button

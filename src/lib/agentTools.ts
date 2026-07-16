@@ -13,6 +13,9 @@ import { startSellerRuntimeBackground } from './samanthaRuntimeHandoff';
 export type SellerToolName =
   | 'navigate_to'
   | 'catalog_publish'
+  | 'accept_order'
+  | 'reject_order'
+  | 'mark_order_fulfilled'
   | 'refund_issue'
   | 'remember_preference'
   | 'delegate_to_runtime_agent';
@@ -31,6 +34,15 @@ export function sellerToolsForMandate(allowedActions: string[] | null | undefine
   const tools: SellerToolName[] = ['navigate_to', 'remember_preference', 'delegate_to_runtime_agent'];
   if (!allowedActions || allowedActions.includes('seller.catalog.publish')) {
     tools.push('catalog_publish');
+  }
+  if (!allowedActions || allowedActions.includes('seller.order.accept')) {
+    tools.push('accept_order');
+  }
+  if (!allowedActions || allowedActions.includes('seller.order.reject')) {
+    tools.push('reject_order');
+  }
+  if (!allowedActions || allowedActions.includes('seller.fulfilment.commit')) {
+    tools.push('mark_order_fulfilled');
   }
   if (!allowedActions || allowedActions.includes('seller.refund.issue')) {
     tools.push('refund_issue');
@@ -98,7 +110,7 @@ export const SELLER_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     name: 'catalog_publish',
-    description: 'Short tool: create and publish one catalog item into the shared demo exchange.',
+    description: 'Short tool: create and publish one catalog item into the shared ONDC exchange.',
     parameters: {
       type: 'object',
       properties: {
@@ -122,6 +134,39 @@ export const SELLER_TOOL_DEFINITIONS = [
         amount_inr: { type: 'number' },
       },
       required: ['amount_inr'],
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'accept_order',
+    description:
+      'Accept one paid Seller order through AgentGuard and open its order page. Omit order_id to use the newest paid order.',
+    parameters: {
+      type: 'object',
+      properties: { order_id: { type: 'string' } },
+      required: [],
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'reject_order',
+    description:
+      'Reject one paid Seller order through AgentGuard and open its order page. Omit order_id to use the newest paid order.',
+    parameters: {
+      type: 'object',
+      properties: { order_id: { type: 'string' } },
+      required: [],
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'mark_order_fulfilled',
+    description:
+      'Mark one accepted Seller order fulfilled through AgentGuard and open its order page. Omit order_id to use the newest accepted order.',
+    parameters: {
+      type: 'object',
+      properties: { order_id: { type: 'string' } },
+      required: [],
     },
   },
   {
@@ -340,7 +385,7 @@ export async function runSellerTool(
       const published = await createAndPublishSellerItem({
         id: `agent-${Date.now()}`,
         name: title,
-        description: String(args.description ?? 'Published by seller agent tool.'),
+        description: String(args.description ?? 'Freshly published grocery item.'),
         price: String(priceInr),
         inventory,
         sellerId: publisher,
@@ -348,7 +393,7 @@ export async function runSellerTool(
       return {
         ok: true,
         tool: name,
-        message: `Published ${published.name} (${published.id}) with ${inventory} in stock — visible on PreProd ONDC when Buyer searches.`,
+        message: `Published ${published.name} with ${inventory} in stock — available when buyers search the ONDC network.`,
         data: { item: published, source: 'demo-commerce-ondc' },
         navigateTo: '/catalog',
       };
@@ -357,6 +402,81 @@ export async function runSellerTool(
         ok: false,
         tool: name,
         message: err instanceof Error ? err.message : 'Publish failed.',
+      };
+    }
+  }
+
+  if (name === 'accept_order' || name === 'reject_order' || name === 'mark_order_fulfilled') {
+    const actionByTool = {
+      accept_order: 'seller.order.accept',
+      reject_order: 'seller.order.reject',
+      mark_order_fulfilled: 'seller.fulfilment.commit',
+    } as const;
+    const eligibleStatus = name === 'mark_order_fulfilled' ? 'accepted' : 'created';
+    let orderId = String(args.order_id ?? '').trim();
+    if (!orderId) {
+      try {
+        const orders = await listCommerceSellerOrders(ctx.sellerId);
+        const latest = orders
+          .filter((order) => order.status === eligibleStatus)
+          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+        orderId = latest?.id ?? '';
+      } catch (err) {
+        return {
+          ok: false,
+          tool: name,
+          message: err instanceof Error ? err.message : 'Could not load Seller orders.',
+        };
+      }
+    }
+    if (!orderId) {
+      return {
+        ok: false,
+        tool: name,
+        message:
+          name === 'mark_order_fulfilled'
+            ? 'No accepted Seller order is ready to mark fulfilled.'
+            : 'No paid Seller order is available for that action.',
+        navigateTo: '/orders',
+      };
+    }
+    try {
+      const action = actionByTool[name];
+      const executed = await executeProtectedAction({
+        walletAddress: wallet || null,
+        action,
+        amountInr: 0,
+        resourceId: orderId,
+        payload: { order_id: orderId },
+      });
+      const decision = executed.decision ?? 'allow';
+      const receiptId = executed.receipt?.receipt_id;
+      const outcome =
+        name === 'accept_order'
+          ? 'accepted'
+          : name === 'reject_order'
+            ? 'rejected'
+            : 'fulfilled';
+      return {
+        ok: decision === 'allow' || Boolean(receiptId),
+        tool: name,
+        message:
+          decision === 'need_approval'
+            ? `Order ${outcome} requires exact one-time approval.`
+            : decision === 'deny'
+              ? `Order ${outcome} was denied by AgentGuard.`
+              : `Order ${outcome}${receiptId ? `; receipt ${receiptId}` : ''}.`,
+        decision,
+        receiptId,
+        data: executed as unknown as Record<string, unknown>,
+        navigateTo: `/orders/${encodeURIComponent(orderId)}`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        tool: name,
+        message: err instanceof Error ? err.message : 'Order update failed.',
+        navigateTo: '/orders',
       };
     }
   }

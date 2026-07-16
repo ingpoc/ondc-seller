@@ -14,6 +14,7 @@ import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
 import { elevatedTrustSatisfied } from '../lib/trust';
+import { useAuthContext } from '../contexts/AuthContext';
 
 interface SellerCatalogItem {
   id: string;
@@ -29,6 +30,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
+  const { isAuthenticated } = useAuthContext();
   const elevatedOk = elevatedTrustSatisfied(trust.state, principalId);
   const { data, loading, error, execute } = useApi('/api/catalog');
 
@@ -49,25 +51,34 @@ export function DashboardPage() {
       : 'Needs action';
 
   return (
-    <PageLayout>
+    <PageLayout
+      title={isAuthenticated ? 'Your catalog' : 'Browse the catalog'}
+      subtitle={
+        isAuthenticated
+          ? 'Manage the products buyers can discover on the ONDC network.'
+          : 'View products currently available from this ONDC Seller.'
+      }
+    >
       <Section
-        title="Catalog and trust"
-        description="Publish listings when verified. Open catalog to manage the full shelf."
         actions={
           <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              onClick={() => navigate('/catalog/new')}
-              disabled={!trust.loading && !elevatedOk}
-            >
-              Add product
-            </Button>
+            {isAuthenticated ? (
+              <Button
+                type="button"
+                onClick={() => navigate('/catalog/new')}
+                disabled={!trust.loading && !elevatedOk}
+              >
+                Add product
+              </Button>
+            ) : null}
             <Button type="button" variant="secondary" onClick={() => navigate('/catalog')}>
-              Open catalog
+              {isAuthenticated ? 'Open catalog' : 'Browse catalog'}
             </Button>
-            <Button type="button" variant="outline" onClick={() => navigate('/agentguard')}>
-              AgentGuard
-            </Button>
+            {isAuthenticated ? (
+              <Button type="button" variant="outline" onClick={() => navigate('/agentguard')}>
+                AgentGuard
+              </Button>
+            ) : null}
           </div>
         }
       >
@@ -81,7 +92,7 @@ export function DashboardPage() {
         ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard label="Products" value={itemCount} hint="Live listings in the demo catalog" />
+          <StatCard label="Products" value={itemCount} hint="Live listings in the ONDC catalog" />
           <StatCard
             label="Categories"
             value={categoryCount}
@@ -102,6 +113,9 @@ export function DashboardPage() {
           <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             Inventory snapshot
           </h2>
+          {itemCount > 5 ? (
+            <p className="text-sm text-muted-foreground">Showing 5 of {itemCount} products</p>
+          ) : null}
         </div>
 
         {loading && !data ? (

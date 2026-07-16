@@ -1,5 +1,5 @@
 /**
- * Portfolio auth via gateway principal session (Auth0, Google, or booth demo).
+ * Portfolio auth via gateway principal session (Auth0, Google, or local test sign-in).
  * Local: VITE_IDENTITY_AUTH_ENABLED=true in .env.local.
  * Production IdP: Auth0 Authorization Code Flow → aadharcha_session cookie.
  */
@@ -10,6 +10,10 @@ import { IDENTITY_URL } from '@/lib/identityUrls';
 
 const LOCAL_IDENTITY_AUTH_ENABLED = import.meta.env.VITE_IDENTITY_AUTH_ENABLED === 'true';
 const AUDIENCE = 'ondcseller';
+
+function matchesAudience(user: SSOUser): boolean {
+  return user.audience === AUDIENCE || user.audience === 'seller';
+}
 
 export type { SSOUser };
 
@@ -59,7 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         const data = await response.json();
-        setUser(data.data);
+        const nextUser = data.data as SSOUser | null;
+        setUser(nextUser && matchesAudience(nextUser) ? nextUser : null);
       } else {
         setUser(null);
       }

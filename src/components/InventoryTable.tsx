@@ -54,6 +54,9 @@ export function InventoryTable({
               Category
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
+              Stock
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
               Actions
             </th>
           </tr>
@@ -96,6 +99,9 @@ export function InventoryTable({
                 </td>
                 <td className="px-4 py-4 align-top">
                   <Badge tone="info">{formatCategory(item.category_id)}</Badge>
+                </td>
+                <td className="px-4 py-4 align-top text-sm font-semibold text-[var(--ui-text)]">
+                  {(item as BecknItem & { quantity?: number }).quantity ?? 0}
                 </td>
                 <td className="px-4 py-4 align-top">
                   <div className="flex flex-wrap gap-2">

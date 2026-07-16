@@ -179,7 +179,7 @@ export function ConfigPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Saved seller configuration in demo mode.',
+          reason: 'Saved seller configuration locally.',
         });
         setTestResult({
           success: true,
@@ -265,7 +265,7 @@ export function ConfigPage() {
           subjectId,
           trustState: trust.state,
           outcome: 'applied',
-          reason: 'Generated demo seller key material.',
+          reason: 'Generated local seller key material.',
         });
         setConfig((prev) => ({
           ...prev,
@@ -275,7 +275,7 @@ export function ConfigPage() {
         setTestResult({
           success: true,
           message:
-            'Generated a local demo key pair. Save the configuration to persist it for browser testing.',
+            'Generated a local key pair. Save the configuration to persist it for browser testing.',
         });
         return;
       }
@@ -338,7 +338,7 @@ export function ConfigPage() {
         setTestResult({
           success: true,
           message:
-            'Local demo mode is active. Configuration structure looks valid for browser testing.',
+            'Local configuration is active and its structure is valid for browser testing.',
         });
         return;
       }

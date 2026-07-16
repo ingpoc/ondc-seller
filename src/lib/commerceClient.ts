@@ -10,6 +10,7 @@ export interface DemoCommerceItem {
   title: string;
   description: string;
   price_inr: number;
+  inventory?: number;
   created_at: string;
   updated_at: string;
 }
@@ -61,7 +62,10 @@ function makeIdempotencyKey(scope: string, id: string) {
   return `${scope}:${id}:${Date.now()}`;
 }
 
-export function mapDemoItemToCatalogItem(item: DemoCommerceItem, inventory = 0): BecknItem {
+export function mapDemoItemToCatalogItem(
+  item: DemoCommerceItem,
+  inventory = item.inventory ?? 0,
+): BecknItem {
   return {
     id: item.item_id,
     name: item.title,
@@ -76,9 +80,9 @@ export function mapDemoItemToCatalogItem(item: DemoCommerceItem, inventory = 0):
     },
     images: [],
     category: {
-      name: 'demo-commerce',
+      name: 'Grocery',
     },
-    category_id: 'demo-commerce',
+    category_id: 'Grocery',
     quantity: inventory,
   } as BecknItem;
 }
@@ -136,7 +140,7 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): UCPOrder {
       providerName: 'Simulated ONDC logistics',
       tracking: {
         status,
-        statusMessage: `Shared demo commerce order ${order.transaction_id}`,
+        statusMessage: `Commerce order ${order.transaction_id}`,
       },
     },
     payment: {

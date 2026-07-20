@@ -15,6 +15,7 @@ describe('Seller product copy', () => {
       source('src/App.tsx'),
       source('src/pages/DashboardPage.tsx'),
       source('src/pages/ConfigPage.tsx'),
+      source('src/pages/SellerLandingPage.tsx'),
     ].join('\n');
 
     expect(usecase).toContain('AgentGuard lets an assistant publish catalog changes');
@@ -24,7 +25,7 @@ describe('Seller product copy', () => {
     expect(usecase).not.toContain('AadhaarChain verifies you once');
     expect(usecase).not.toContain('re-checked against AadhaarChain trust');
     expect(sellerUi).toContain('ONDC network connection');
-    expect(sellerUi).toContain('Catalog, orders, and assistant permissions');
+    expect(sellerUi).toContain('listings, customer orders, protected refunds, and assistant permissions');
     expect(sellerUi).not.toContain("label: auth_mode");
     expect(sellerUi).toContain('Seller connection settings');
     expect(sellerUi).not.toContain('Connect your Seller account to AgentGuard');

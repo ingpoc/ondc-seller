@@ -29,7 +29,7 @@ describe('Seller ConfigPage (SDK-SELLER-CONFIG-001)', () => {
   describe('Configuration fields', () => {
     it('should have baseUrl field', () => {
       const config: Partial<SellerClientConfig> = {
-        baseUrl: 'https://gateway.ondc.org',
+        baseUrl: 'https://preprod.gateway.ondc.org',
       };
       expect(config.baseUrl).toBeDefined();
       expect(typeof config.baseUrl).toBe('string');
@@ -142,7 +142,7 @@ describe('Seller ConfigPage (SDK-SELLER-CONFIG-001)', () => {
 
   describe('Configuration defaults', () => {
     it('should have default gateway URL', () => {
-      const defaultBaseUrl = 'https://gateway.ondc.org';
+      const defaultBaseUrl = 'https://preprod.gateway.ondc.org';
       expect(defaultBaseUrl).toContain('https://');
       expect(defaultBaseUrl).toContain('ondc.org');
     });

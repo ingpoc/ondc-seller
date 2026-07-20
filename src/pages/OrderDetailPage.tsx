@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useWallet } from '@solana/wallet-adapter-react';
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,32 +9,20 @@ import { TrustNotice } from '@/components/TrustStatus';
 import { useSubject, useTrustState } from '@/hooks';
 import { effectiveElevatedTrustState, type PortfolioTrustState } from '@/lib/trust';
 import { recordSellerActionAuditEvent } from '@/lib/localSellerAudit';
-import {
-  buildSellerActionHeaders,
-  buildSellerBackendActionPolicy,
-  canExecuteSellerAction,
-  type SellerSensitiveAction,
-} from '@/lib/sellerActionPolicy';
 import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
+import { listSellerOrderNotesForOrder } from '../lib/localSellerNotes';
 import {
-  acceptDemoSellerOrder,
-  dispatchDemoSellerOrder,
-  getDemoSellerOrder,
-  listSellerOrderNotesForOrder,
-  refundDemoSellerOrder,
-  rejectDemoSellerOrder,
-} from '../lib/localSellerOrders';
-import { getCommerceOrder } from '../lib/commerceClient';
+  getCommerceOrder,
+  paymentStatusLabel,
+  type SellerCommerceOrder,
+} from '../lib/commerceClient';
+import { customerReference } from '../lib/displayText';
+import { executeProtectedAction, verifyReceipt } from '../lib/agentGuardClient';
 import {
-  consumeApproval,
-  evaluateRefund,
-  executeProtectedAction,
-  verifyReceipt,
-  type AgentGuardApproval,
-  type AgentGuardReceipt,
-} from '../lib/agentGuardClient';
-import { LEGACY_ACTION_ALIASES } from '@aadharchain/agentguard-contract';
-import { createSignedIdentityProof } from '../lib/trust';
+  LEGACY_ACTION_ALIASES,
+  type Approval,
+  type IntentReceipt,
+} from '@aadharchain/agentguard-contract';
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canDispatchOrder = (status: UCPOrderStatus): boolean =>
@@ -44,15 +31,8 @@ type SellerOrderMutation = 'accept' | 'reject' | 'dispatch';
 
 export function canMutateSellerOrder(
   status: UCPOrderStatus,
-  mutation: SellerOrderMutation,
-  trustState: PortfolioTrustState
+  mutation: SellerOrderMutation
 ): boolean {
-  const actionByMutation: Record<SellerOrderMutation, SellerSensitiveAction> = {
-    accept: 'order_accept',
-    reject: 'order_reject',
-    dispatch: 'order_dispatch',
-  };
-  if (!canExecuteSellerAction(actionByMutation[mutation], trustState)) return false;
   if (mutation === 'accept') return canAcceptOrder(status);
   if (mutation === 'reject') return canRejectOrder(status);
   return canDispatchOrder(status);
@@ -66,11 +46,21 @@ export function sellerRefundTrustSatisfied(
   return demoMode || effectiveElevatedTrustState(trustState, principalId) === 'verified';
 }
 
-export function sellerApprovalNeedsWalletProof(
-  principalId: string | null | undefined,
-  demoMode: boolean
-): boolean {
-  return !demoMode && !principalId;
+export function fullRefundAmount(
+  order: Pick<UCPOrder, 'total'> & { refundedAmountInr?: number }
+): number {
+  return Math.max(
+    0,
+    Math.round(Number(order.total) || 0) - Math.round(Number(order.refundedAmountInr) || 0)
+  );
+}
+
+export function refundConfirmationCopy(
+  amountInr: number,
+  orderReference: string,
+  customerName: string
+): string {
+  return `Refund INR ${Math.round(amountInr).toLocaleString('en-IN')} to ${customerName} for order ${orderReference}? Payment will become Refunded and the order will close as Cancelled. This cannot be undone.`;
 }
 
 const STATUS_LABELS: Record<UCPOrderStatus, string> = {
@@ -105,7 +95,7 @@ interface TimelineEvent {
   completed: boolean;
 }
 
-function getOrderTimeline(order: UCPOrder): TimelineEvent[] {
+export function getOrderTimeline(order: UCPOrder): TimelineEvent[] {
   const events: TimelineEvent[] = [
     {
       status: 'created',
@@ -134,7 +124,7 @@ function getOrderTimeline(order: UCPOrder): TimelineEvent[] {
     events.push({
       status: 'cancelled',
       label: 'Order cancelled',
-      timestamp: order.cancellation?.cancelledAt,
+      timestamp: order.cancellation?.cancelledAt || order.updatedAt,
       completed: true,
     });
   }
@@ -160,16 +150,15 @@ function formatDate(value?: string) {
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { signMessage } = useWallet();
   const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
-  const [order, setOrder] = useState<UCPOrder | null>(null);
+  const [order, setOrder] = useState<SellerCommerceOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<AgentGuardApproval | null>(null);
-  const [lastApprovalId, setLastApprovalId] = useState<string | null>(null);
-  const [lastReceipt, setLastReceipt] = useState<AgentGuardReceipt | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<Approval | null>(null);
+  const [refundConfirmation, setRefundConfirmation] = useState<number | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<IntentReceipt | null>(null);
   const [agentGuardMessage, setAgentGuardMessage] = useState<string | null>(null);
   const orderNotes = order ? listSellerOrderNotesForOrder(order.id) : [];
 
@@ -184,7 +173,7 @@ export function OrderDetailPage() {
       try {
         // The shared commerce exchange is the portfolio order source in both
         // local and deployed AgentGuard lanes. A configured legacy UCP API is
-        // only a fallback; local fixtures are last.
+        // the only fallback; browser fixtures cannot become order authority.
         try {
           setOrder(await getCommerceOrder(id));
           return;
@@ -198,10 +187,7 @@ export function OrderDetailPage() {
             setOrder(data.order);
             return;
           }
-          const demoOrder = getDemoSellerOrder(id);
-          if (!demoOrder) throw commerceError;
-          setOrder(demoOrder);
-          return;
+          throw commerceError;
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load order');
@@ -215,7 +201,7 @@ export function OrderDetailPage() {
 
   async function handleAccept() {
     if (!order || !id) return;
-    if (!canMutateSellerOrder(order.status, 'accept', trust.state)) {
+    if (!canMutateSellerOrder(order.status, 'accept')) {
       recordSellerActionAuditEvent({
         action: 'order_accept',
         targetId: id,
@@ -223,43 +209,28 @@ export function OrderDetailPage() {
         subjectId,
         trustState: trust.state,
         outcome: 'blocked',
-        reason: 'Verified seller trust is required before accepting orders.',
+        reason: 'This order cannot be accepted from its current status.',
       });
-      setError('Verified seller trust is required before accepting orders.');
+      setError('This order cannot be accepted from its current status.');
       return;
     }
     setProcessing('accept');
     try {
-      if (COMMERCE_DEMO_MODE) {
-        const next = acceptDemoSellerOrder(id);
-        if (!next) throw new Error('Order not found');
-        recordSellerActionAuditEvent({
-          action: 'order_accept',
-          targetId: id,
-          walletAddress,
-          subjectId,
-          trustState: trust.state,
-          outcome: 'applied',
-          reason: 'Accepted seller order locally.',
-        });
-        setOrder(next);
-        return;
-      }
-
-      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/accept`), {
-        method: 'POST',
-        credentials: 'include',
-        headers: buildSellerActionHeaders(
-          buildSellerBackendActionPolicy('order_accept', {
-            trustState: trust.state,
-            walletAddress,
-            subjectId,
-            auditSubjectId: id,
-          })
-        ),
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: 'seller.order.accept',
+        amountInr: 0,
+        resourceId: id,
+        idempotencyKey: `seller.order.accept:${id}`,
+        payload: { order_id: id },
       });
-      if (!response.ok) throw new Error('Failed to accept order');
-      const data = await response.json();
+      if (!executed.execution) {
+        throw new Error(
+          executed.decision === 'need_approval'
+            ? 'Order acceptance requires exact approval.'
+            : 'Order acceptance was denied by AgentGuard.'
+        );
+      }
       recordSellerActionAuditEvent({
         action: 'order_accept',
         targetId: id,
@@ -269,7 +240,7 @@ export function OrderDetailPage() {
         outcome: 'applied',
         reason: 'Accepted seller order through commerce API.',
       });
-      setOrder(data.order);
+      setOrder(await getCommerceOrder(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept order');
     } finally {
@@ -279,7 +250,7 @@ export function OrderDetailPage() {
 
   async function handleReject() {
     if (!order || !id) return;
-    if (!canMutateSellerOrder(order.status, 'reject', trust.state)) {
+    if (!canMutateSellerOrder(order.status, 'reject')) {
       recordSellerActionAuditEvent({
         action: 'order_reject',
         targetId: id,
@@ -287,47 +258,35 @@ export function OrderDetailPage() {
         subjectId,
         trustState: trust.state,
         outcome: 'blocked',
-        reason: 'Verified seller trust is required before rejecting orders.',
+        reason: 'This order cannot be rejected from its current status.',
       });
-      setError('Verified seller trust is required before rejecting orders.');
+      setError('This order cannot be rejected from its current status.');
       return;
     }
-    if (!confirm('Are you sure you want to reject this order?')) return;
+    if (
+      !confirm(
+        `Reject order ${customerReference(id)}? The customer order will be cancelled. This cannot be undone.`
+      )
+    )
+      return;
 
     setProcessing('reject');
     try {
-      if (COMMERCE_DEMO_MODE) {
-        const next = rejectDemoSellerOrder(id, 'Seller rejected the order');
-        if (!next) throw new Error('Order not found');
-        recordSellerActionAuditEvent({
-          action: 'order_reject',
-          targetId: id,
-          walletAddress,
-          subjectId,
-          trustState: trust.state,
-          outcome: 'applied',
-          reason: 'Rejected seller order locally.',
-        });
-        setOrder(next);
-        return;
-      }
-
-      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/reject`), {
-        method: 'POST',
-        credentials: 'include',
-        headers: buildSellerActionHeaders(
-          buildSellerBackendActionPolicy('order_reject', {
-            trustState: trust.state,
-            walletAddress,
-            subjectId,
-            auditSubjectId: id,
-            auditReferenceId: 'seller-rejection',
-          })
-        ),
-        body: JSON.stringify({ reason: 'Seller rejected the order' }),
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: 'seller.order.reject',
+        amountInr: 0,
+        resourceId: id,
+        idempotencyKey: `seller.order.reject:${id}`,
+        payload: { order_id: id, reason: 'Seller rejected the order' },
       });
-      if (!response.ok) throw new Error('Failed to reject order');
-      const data = await response.json();
+      if (!executed.execution) {
+        throw new Error(
+          executed.decision === 'need_approval'
+            ? 'Order rejection requires exact approval.'
+            : 'Order rejection was denied by AgentGuard.'
+        );
+      }
       recordSellerActionAuditEvent({
         action: 'order_reject',
         targetId: id,
@@ -337,7 +296,7 @@ export function OrderDetailPage() {
         outcome: 'applied',
         reason: 'Rejected seller order through commerce API.',
       });
-      setOrder(data.order);
+      setOrder(await getCommerceOrder(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject order');
     } finally {
@@ -347,7 +306,7 @@ export function OrderDetailPage() {
 
   async function handleDispatch() {
     if (!order || !id) return;
-    if (!canMutateSellerOrder(order.status, 'dispatch', trust.state)) {
+    if (!canMutateSellerOrder(order.status, 'dispatch')) {
       recordSellerActionAuditEvent({
         action: 'order_dispatch',
         targetId: id,
@@ -355,9 +314,9 @@ export function OrderDetailPage() {
         subjectId,
         trustState: trust.state,
         outcome: 'blocked',
-        reason: 'Verified seller trust is required before dispatching orders.',
+        reason: 'This order cannot be dispatched from its current status.',
       });
-      setError('Verified seller trust is required before dispatching orders.');
+      setError('This order cannot be dispatched from its current status.');
       return;
     }
     const trackingId = prompt('Enter tracking ID:');
@@ -365,38 +324,21 @@ export function OrderDetailPage() {
 
     setProcessing('dispatch');
     try {
-      if (COMMERCE_DEMO_MODE) {
-        const next = dispatchDemoSellerOrder(id, trackingId);
-        if (!next) throw new Error('Order not found');
-        recordSellerActionAuditEvent({
-          action: 'order_dispatch',
-          targetId: id,
-          walletAddress,
-          subjectId,
-          trustState: trust.state,
-          outcome: 'applied',
-          reason: 'Dispatched seller order locally.',
-        });
-        setOrder(next);
-        return;
-      }
-
-      const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}/dispatch`), {
-        method: 'POST',
-        credentials: 'include',
-        headers: buildSellerActionHeaders(
-          buildSellerBackendActionPolicy('order_dispatch', {
-            trustState: trust.state,
-            walletAddress,
-            subjectId,
-            auditSubjectId: id,
-            auditReferenceId: trackingId,
-          })
-        ),
-        body: JSON.stringify({ trackingId, providerName: 'Standard Courier' }),
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: 'seller.fulfilment.commit',
+        amountInr: 0,
+        resourceId: id,
+        idempotencyKey: `seller.fulfilment.commit:${id}`,
+        payload: { order_id: id, tracking_id: trackingId, provider_name: 'Standard Courier' },
       });
-      if (!response.ok) throw new Error('Failed to dispatch order');
-      const data = await response.json();
+      if (!executed.execution) {
+        throw new Error(
+          executed.decision === 'need_approval'
+            ? 'Fulfilment update requires exact approval.'
+            : 'Fulfilment update was denied by AgentGuard.'
+        );
+      }
       recordSellerActionAuditEvent({
         action: 'order_dispatch',
         targetId: id,
@@ -406,7 +348,7 @@ export function OrderDetailPage() {
         outcome: 'applied',
         reason: 'Dispatched seller order through commerce API.',
       });
-      setOrder(data.order);
+      setOrder(await getCommerceOrder(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch order');
     } finally {
@@ -414,22 +356,19 @@ export function OrderDetailPage() {
     }
   }
 
-  async function applyAllowedRefund(amountInr: number, receipt: AgentGuardReceipt) {
+  async function applyAllowedRefund(amountInr: number, receipt: IntentReceipt) {
     if (!id) return;
-    if (COMMERCE_DEMO_MODE) {
-      const next = refundDemoSellerOrder(id, amountInr, receipt.receipt_id);
-      if (!next) throw new Error('Order not found');
-      setOrder(next);
-    }
+    setOrder(await getCommerceOrder(id));
     setLastReceipt(receipt);
     setPendingApproval(null);
     setAgentGuardMessage(
-      `Refund INR ${amountInr} allowed. Receipt ${receipt.receipt_id} (no identity data).`
+      `Refund INR ${amountInr} allowed. Authorization reference ${customerReference(receipt.receipt_id)}.`
     );
   }
 
   async function handleAgentGuardRefund(amountInr: number) {
     if (!order || !id) return;
+    setRefundConfirmation(null);
     // AgentGuard binds cookie principal; wallet is legacy hangar only.
     if (!subjectId) {
       setError('Sign in before AgentGuard refunds.');
@@ -457,7 +396,6 @@ export function OrderDetailPage() {
         });
         if (executed.decision === 'need_approval' && executed.approval) {
           setPendingApproval(executed.approval);
-          setLastApprovalId(executed.approval.approval_id);
           setAgentGuardMessage(
             executed.approval ? 'Approval required for this refund.' : 'Approval required.'
           );
@@ -477,32 +415,14 @@ export function OrderDetailPage() {
           const verified = await verifyReceipt({ receiptId: executed.receipt.receipt_id });
           if (verified.valid) {
             setAgentGuardMessage(
-              `Refund INR ${amountInr} allowed. Receipt ${executed.receipt.receipt_id} verified.`
+              `Refund INR ${amountInr} allowed. Authorization reference ${customerReference(executed.receipt.receipt_id)} verified.`
             );
           }
           return;
         }
-      } catch {
-        // Fall back to evaluate-only path for need_approval UX when execute requires approval payload.
+      } catch (err) {
+        throw err;
       }
-      const result = await evaluateRefund({
-        walletAddress,
-        amountInr,
-        resourceId: id,
-      });
-      if (result.decision === 'allow' && result.receipt) {
-        await applyAllowedRefund(amountInr, result.receipt);
-        return;
-      }
-      if (result.decision === 'need_approval' && result.approval) {
-        setPendingApproval(result.approval);
-        setLastApprovalId(result.approval.approval_id);
-        setAgentGuardMessage(result.reason);
-        return;
-      }
-      setPendingApproval(null);
-      setAgentGuardMessage(result.reason || 'Refund denied.');
-      if (result.receipt) setLastReceipt(result.receipt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AgentGuard refund failed');
     } finally {
@@ -518,52 +438,21 @@ export function OrderDetailPage() {
     setProcessing('approve');
     setError(null);
     try {
-      // Demo/Hermes: skip wallet popup; consume is the one-time authority gate.
-      if (
-        sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE) &&
-        signMessage &&
-        walletAddress
-      ) {
-        await createSignedIdentityProof({
-          walletAddress,
-          audience: 'seller',
-          purpose: 'seller_refund_approval',
-          signMessage,
-        });
-      } else if (sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE)) {
-        setError('Wallet signMessage is required to approve once.');
-        return;
-      }
-      const consumed = await consumeApproval({
+      const executed = await executeProtectedAction({
         walletAddress,
+        action: LEGACY_ACTION_ALIASES.refund,
+        amountInr: pendingApproval.amount_inr,
+        resourceId: pendingApproval.resource_id,
         approvalId: pendingApproval.approval_id,
+        idempotencyKey: `seller-refund:${pendingApproval.resource_id}:${pendingApproval.amount_inr}:${pendingApproval.approval_id}`,
+        payload: { order_id: pendingApproval.resource_id },
       });
-      await applyAllowedRefund(pendingApproval.amount_inr, consumed.receipt);
+      if (!executed.receipt || !executed.execution) {
+        throw new Error('Approved refund was not executed.');
+      }
+      await applyAllowedRefund(pendingApproval.amount_inr, executed.receipt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Approval failed');
-    } finally {
-      setProcessing(null);
-    }
-  }
-
-  async function handleReplayApproval() {
-    const approvalId = lastApprovalId || pendingApproval?.approval_id;
-    if (!approvalId || !subjectId) {
-      setError('No approval to replay.');
-      return;
-    }
-    setProcessing('replay');
-    setError(null);
-    try {
-      await consumeApproval({
-        walletAddress,
-        approvalId,
-      });
-      setAgentGuardMessage('Unexpected: replay succeeded');
-    } catch (err) {
-      setAgentGuardMessage(
-        err instanceof Error ? err.message : 'Approval already consumed (replay rejected).'
-      );
     } finally {
       setProcessing(null);
     }
@@ -626,11 +515,16 @@ export function OrderDetailPage() {
             Order detail
           </div>
           <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
-            Order #{order.id}
+            Order reference {customerReference(order.id)}
           </h1>
           <p className="text-sm text-muted-foreground">Placed on {formatDate(order.createdAt)}</p>
         </div>
-        <Badge className={getStatusTone(order.status)}>{STATUS_LABELS[order.status]}</Badge>
+        <div className="flex flex-wrap gap-2">
+          <Badge className={getStatusTone(order.status)}>{STATUS_LABELS[order.status]}</Badge>
+          <Badge className="bg-primary/12 text-primary">
+            Payment: {paymentStatusLabel(order.paymentStatus)}
+          </Badge>
+        </div>
       </div>
 
       <TrustNotice
@@ -641,13 +535,90 @@ export function OrderDetailPage() {
         actionLabel="Resolve seller trust"
       />
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Buyer and delivery</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Buyer
+              </div>
+              <p className="text-sm font-medium text-foreground">
+                {order.buyer?.name || 'Unknown buyer'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {order.buyer?.contact?.phone || order.buyer?.phone || 'No phone'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {order.buyer?.contact?.email || order.buyer?.email || 'No email'}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Delivery
+              </div>
+              <p className="text-sm font-medium text-foreground">
+                {order.deliveryAddress?.name || 'No recipient'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {order.deliveryAddress?.line1 || 'No line 1'}
+              </p>
+              {order.deliveryAddress?.line2 ? (
+                <p className="text-sm text-muted-foreground">{order.deliveryAddress.line2}</p>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                {[
+                  order.deliveryAddress?.city,
+                  order.deliveryAddress?.state,
+                  order.deliveryAddress?.postalCode,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {order.deliveryAddress?.country || 'Country unavailable'}
+              </p>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Fulfillment
+              </div>
+              <p className="text-sm text-foreground">
+                {order.fulfillment?.providerName || 'Pending provider'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {order.fulfillment?.tracking?.statusMessage || 'No tracking update yet.'}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Payment and authorization
+              </div>
+              <p className="text-sm font-medium text-foreground">
+                Payment: {paymentStatusLabel(order.paymentStatus)}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                AgentGuard checks each protected seller action independently.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-3">
         {canAcceptOrder(order.status) ? (
           <Button
             disabled={
               processing === 'accept' ||
               trust.loading ||
-              !canMutateSellerOrder(order.status, 'accept', trust.state)
+              !canMutateSellerOrder(order.status, 'accept')
             }
             onClick={() => void handleAccept()}
           >
@@ -660,11 +631,11 @@ export function OrderDetailPage() {
             disabled={
               processing === 'reject' ||
               trust.loading ||
-              !canMutateSellerOrder(order.status, 'reject', trust.state)
+              !canMutateSellerOrder(order.status, 'reject')
             }
             onClick={() => void handleReject()}
           >
-            {processing === 'reject' ? 'Processing…' : 'Reject order'}
+            {processing === 'reject' ? 'Processing…' : 'Review rejection'}
           </Button>
         ) : null}
         {canDispatchOrder(order.status) ? (
@@ -672,7 +643,7 @@ export function OrderDetailPage() {
             disabled={
               processing === 'dispatch' ||
               trust.loading ||
-              !canMutateSellerOrder(order.status, 'dispatch', trust.state)
+              !canMutateSellerOrder(order.status, 'dispatch')
             }
             onClick={() => void handleDispatch()}
           >
@@ -687,59 +658,80 @@ export function OrderDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            INR 3,000 auto-allows; INR 7,500 needs one-time approval. Policy limit INR 5,000.
+            {fullRefundAmount(order) > 0
+              ? 'Review the customer, amount, and final order state before confirming. AgentGuard will request one-time approval when your mandate requires it.'
+              : 'The full order value has been refunded. No further refund is available.'}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              data-testid="refund-3000"
-              disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
-              onClick={() => void handleAgentGuardRefund(3000)}
-            >
-              {processing === 'refund-3000' ? 'Processing…' : 'Refund INR 3,000'}
-            </Button>
-            <Button
-              data-testid="refund-7500"
-              variant="outline"
-              disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
-              onClick={() => void handleAgentGuardRefund(7500)}
-            >
-              {processing === 'refund-7500' ? 'Processing…' : 'Refund INR 7,500'}
-            </Button>
-          </div>
+          {fullRefundAmount(order) > 0 ? (
+            refundConfirmation === fullRefundAmount(order) ? (
+              <div
+                className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4"
+                role="alertdialog"
+                aria-labelledby="refund-confirmation-title"
+                aria-describedby="refund-confirmation-description"
+              >
+                <p id="refund-confirmation-title" className="font-medium text-foreground">
+                  Confirm full refund
+                </p>
+                <p id="refund-confirmation-description" className="text-sm text-muted-foreground">
+                  {refundConfirmationCopy(
+                    refundConfirmation,
+                    customerReference(order.id),
+                    order.buyer?.name ?? 'the customer'
+                  )}{' '}
+                  AgentGuard checks the action after you confirm.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    data-testid="confirm-refund-full-amount"
+                    variant="destructive"
+                    disabled={!!processing}
+                    onClick={() => void handleAgentGuardRefund(refundConfirmation)}
+                  >
+                    Confirm full refund
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!!processing}
+                    onClick={() => setRefundConfirmation(null)}
+                  >
+                    Keep order
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  data-testid="refund-full-amount"
+                  disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
+                  onClick={() => setRefundConfirmation(fullRefundAmount(order))}
+                >
+                  {`Review full refund (INR ${fullRefundAmount(order).toLocaleString('en-IN')})`}
+                </Button>
+              </div>
+            )
+          ) : null}
           {agentGuardMessage ? (
             <p className="text-sm text-foreground" data-testid="agentguard-message">
               {agentGuardMessage}
             </p>
           ) : null}
-          {pendingApproval || lastApprovalId ? (
+          {pendingApproval ? (
             <div className="flex flex-wrap gap-2" data-testid="agentguard-approval">
-              {pendingApproval ? (
-                <Button
-                  data-testid="approve-once"
-                  disabled={
-                    !!processing ||
-                    (sellerApprovalNeedsWalletProof(principalId, COMMERCE_DEMO_MODE) &&
-                      !signMessage)
-                  }
-                  onClick={() => void handleApproveOnce()}
-                >
-                  {processing === 'approve' ? 'Approving…' : 'Approve once'}
-                </Button>
-              ) : null}
               <Button
-                data-testid="replay-approval"
-                variant="destructive"
+                data-testid="approve-once"
                 disabled={!!processing}
-                onClick={() => void handleReplayApproval()}
+                onClick={() => void handleApproveOnce()}
               >
-                {processing === 'replay' ? 'Replaying…' : 'Replay approval'}
+                {processing === 'approve' ? 'Approving…' : 'Approve once'}
               </Button>
             </div>
           ) : null}
           {lastReceipt ? (
             <p className="text-sm text-muted-foreground" data-testid="agentguard-last-receipt">
-              Last receipt: {lastReceipt.receipt_id} · {lastReceipt.outcome} · INR{' '}
-              {lastReceipt.amount_inr}
+              Last authorization reference: {customerReference(lastReceipt.receipt_id)} ·{' '}
+              {lastReceipt.outcome} · INR {lastReceipt.amount_inr}
             </p>
           ) : null}
         </CardContent>
@@ -759,83 +751,6 @@ export function OrderDetailPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Buyer and delivery</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Buyer
-                  </div>
-                  <p className="text-sm font-medium text-foreground">
-                    {order.buyer?.name || 'Unknown buyer'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.buyer?.contact?.phone || order.buyer?.phone || 'No phone'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.buyer?.contact?.email || order.buyer?.email || 'No email'}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Delivery
-                  </div>
-                  <p className="text-sm font-medium text-foreground">
-                    {order.deliveryAddress?.name || 'No recipient'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.deliveryAddress?.line1 || 'No line 1'}
-                  </p>
-                  {order.deliveryAddress?.line2 ? (
-                    <p className="text-sm text-muted-foreground">{order.deliveryAddress.line2}</p>
-                  ) : null}
-                  <p className="text-sm text-muted-foreground">
-                    {[
-                      order.deliveryAddress?.city,
-                      order.deliveryAddress?.state,
-                      order.deliveryAddress?.postalCode,
-                    ]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.deliveryAddress?.country || 'Country unavailable'}
-                  </p>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Fulfillment
-                  </div>
-                  <p className="text-sm text-foreground">
-                    {order.fulfillment?.providerName || 'Pending provider'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.fulfillment?.tracking?.statusMessage || 'No tracking update yet.'}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Payment
-                  </div>
-                  <p className="text-sm text-foreground">
-                    {order.payment?.type || 'Unknown payment type'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.payment?.status || 'Unknown status'}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader>
               <CardTitle>Order items</CardTitle>

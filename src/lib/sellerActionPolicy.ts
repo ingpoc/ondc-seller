@@ -1,5 +1,9 @@
 import { sessionSkipsLegacyTrust, type PortfolioTrustState } from './trust';
 
+// Legacy compatibility policy for Seller Config and catalog-delete routes that
+// do not yet have AgentGuard actions. Owner: ConfigPage/CatalogPage.
+// Delete after 2026-08-01 once those routes move behind the gateway executor.
+
 export type SellerSensitiveAction =
   | 'catalog_save'
   | 'catalog_delete'

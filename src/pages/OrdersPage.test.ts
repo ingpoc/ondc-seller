@@ -203,14 +203,16 @@ describe('Seller OrdersPage (SDK-SELLER-ORDERS-002)', () => {
               subtotal: { currency: 'INR', value: '100.00' },
               breakup: [],
             },
+            paymentStatus: 'paid',
           },
           actionsDisabled: true,
-        }),
+        })
       );
 
       expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'View Details' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Review rejection' })).toBeDisabled();
+      expect(screen.getByText('Payment: Paid')).toBeVisible();
+      expect(screen.getByRole('button', { name: /View order/i })).not.toBeDisabled();
     });
   });
 

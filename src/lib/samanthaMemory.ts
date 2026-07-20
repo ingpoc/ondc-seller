@@ -14,7 +14,7 @@ export type SamanthaMemory = {
 const MAX_ITEMS = 8;
 
 function storageKey(principalId: string | null | undefined): string {
-  const id = (principalId || 'guest').slice(0, 64);
+  const id = encodeURIComponent((principalId || '').slice(0, 160));
   return `samantha-seller-memory:${id}`;
 }
 
@@ -29,6 +29,7 @@ export function emptySamanthaMemory(): SamanthaMemory {
 }
 
 export function loadSamanthaMemory(principalId?: string | null): SamanthaMemory {
+  if (!principalId?.trim()) return emptySamanthaMemory();
   try {
     const raw = localStorage.getItem(storageKey(principalId));
     if (!raw) return emptySamanthaMemory();
@@ -46,35 +47,7 @@ export function loadSamanthaMemory(principalId?: string | null): SamanthaMemory 
 }
 
 export function loadSamanthaMemoryMerged(principalId?: string | null): SamanthaMemory {
-  const primary = loadSamanthaMemory(principalId);
-  const hasPrimary =
-    primary.likes.length +
-      primary.dislikes.length +
-      primary.preferences.length +
-      primary.notes.length >
-    0;
-  if (hasPrimary || typeof localStorage === 'undefined') return primary;
-
-  const merged = emptySamanthaMemory();
-  let latest = primary.updatedAt;
-  try {
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith('samantha-seller-memory:')) continue;
-      const part = loadSamanthaMemory(key.slice('samantha-seller-memory:'.length));
-      for (const field of ['likes', 'dislikes', 'preferences', 'notes'] as const) {
-        for (const item of part[field]) {
-          if (!merged[field].includes(item)) merged[field].push(item);
-        }
-        merged[field] = merged[field].slice(0, MAX_ITEMS);
-      }
-      if (part.updatedAt > latest) latest = part.updatedAt;
-    }
-  } catch {
-    return primary;
-  }
-  merged.updatedAt = latest;
-  return merged;
+  return loadSamanthaMemory(principalId);
 }
 
 export function saveSamanthaMemory(
@@ -88,7 +61,9 @@ export function saveSamanthaMemory(
     notes: memory.notes.slice(0, MAX_ITEMS),
     updatedAt: new Date().toISOString(),
   };
-  localStorage.setItem(storageKey(principalId), JSON.stringify(next));
+  if (principalId?.trim()) {
+    localStorage.setItem(storageKey(principalId), JSON.stringify(next));
+  }
   window.dispatchEvent(new CustomEvent('seller-samantha-memory-changed'));
   return next;
 }

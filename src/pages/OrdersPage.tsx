@@ -1,25 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
+import type { UCPOrderStatus } from '@ondc-sdk/shared';
 
 import { cn } from '@/lib/utils';
 import { AsyncState, Badge, Button, Card, PageHeader, PageLayout } from '@/components/seller-ui';
 import { TrustNotice } from '@/components/TrustStatus';
-import { effectiveElevatedTrustState, elevatedTrustSatisfied } from '@/lib/trust';
+import { effectiveElevatedTrustState } from '@/lib/trust';
 import { useSubject, useTrustState } from '@/hooks';
 import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import {
-  acceptDemoSellerOrder,
-  listDemoSellerOrders,
-  rejectDemoSellerOrder,
-} from '../lib/localSellerOrders';
-import { listCommerceSellerOrders, transitionCommerceSellerOrder } from '../lib/commerceClient';
+  listCommerceSellerOrders,
+  paymentStatusLabel,
+  type SellerCommerceOrder,
+} from '../lib/commerceClient';
+import { customerReference } from '../lib/displayText';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
-import {
-  buildSellerActionHeaders,
-  buildSellerBackendActionPolicy,
-  canExecuteSellerAction,
-} from '../lib/sellerActionPolicy';
+import { executeProtectedAction } from '../lib/agentGuardClient';
 
 const isPendingStatus = (status: UCPOrderStatus): boolean => status === 'created';
 const isAcceptedStatus = (status: UCPOrderStatus): boolean =>
@@ -31,6 +27,25 @@ const isCancelledStatus = (status: UCPOrderStatus): boolean =>
   ['cancelled', 'returned'].includes(status);
 
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'dispatched' | 'completed' | 'cancelled';
+
+const ORDER_LOAD_TIMEOUT_MS = 10_000;
+
+async function withOrderLoadTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Order loading timed out. Retry to request a fresh queue.')),
+          ORDER_LOAD_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 const filterOptions: StatusFilter[] = [
   'all',
@@ -61,7 +76,7 @@ function statusTone(status: UCPOrderStatus) {
   return 'success' as const;
 }
 
-function filterOrders(orders: UCPOrder[], filter: StatusFilter) {
+function filterOrders(orders: SellerCommerceOrder[], filter: StatusFilter) {
   if (filter === 'all') return orders;
 
   const filterMap: Record<StatusFilter, (status: UCPOrderStatus) => boolean> = {
@@ -76,7 +91,7 @@ function filterOrders(orders: UCPOrder[], filter: StatusFilter) {
   return orders.filter((order) => filterMap[filter](order.status));
 }
 
-function countOrdersByFilter(orders: UCPOrder[], filter: StatusFilter) {
+function countOrdersByFilter(orders: SellerCommerceOrder[], filter: StatusFilter) {
   return filterOrders(orders, filter).length;
 }
 
@@ -88,7 +103,7 @@ export function OrderCard({
   processing,
   actionsDisabled = false,
 }: {
-  order: UCPOrder;
+  order: SellerCommerceOrder;
   onAccept?: (orderId: string) => void;
   onReject?: (orderId: string) => void;
   onViewDetails?: (orderId: string) => void;
@@ -106,7 +121,7 @@ export function OrderCard({
       <div className="flex items-start justify-between gap-4 border-b border-[var(--ui-border)] pb-5">
         <div className="space-y-1">
           <div className="text-base font-semibold tracking-[-0.02em] text-[var(--ui-text)]">
-            Order #{order.id}
+            Order reference {customerReference(order.id)}
           </div>
           <div className="text-sm text-[var(--ui-text-secondary)]">
             {new Date(order.createdAt).toLocaleDateString('en-US', {
@@ -116,7 +131,12 @@ export function OrderCard({
             })}
           </div>
         </div>
-        <Badge tone={statusTone(order.status)}>{statusLabels[order.status] ?? order.status}</Badge>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Badge tone={statusTone(order.status)}>
+            {statusLabels[order.status] ?? order.status}
+          </Badge>
+          <Badge tone="success">Payment: {paymentStatusLabel(order.paymentStatus)}</Badge>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -172,7 +192,7 @@ export function OrderCard({
               onClick={() => onReject?.(order.id)}
               disabled={isProcessing || actionsDisabled}
             >
-              Reject
+              Review rejection
             </Button>
           ) : null}
           <Button
@@ -181,7 +201,7 @@ export function OrderCard({
             variant="secondary"
             onClick={() => onViewDetails?.(order.id)}
           >
-            View Details
+            View order {customerReference(order.id)}
           </Button>
         </div>
       </div>
@@ -193,16 +213,13 @@ export function OrdersPage() {
   const navigate = useNavigate();
   const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
-  const [orders, setOrders] = useState<UCPOrder[]>([]);
+  const [orders, setOrders] = useState<SellerCommerceOrder[]>([]);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
-  const [usingLocalOrderCache, setUsingLocalOrderCache] = useState(false);
-  const orderActionsDisabled =
-    trust.loading ||
-    (!elevatedTrustSatisfied(trust.state, principalId) &&
-      !canExecuteSellerAction('order_accept', trust.state));
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const orderActionsDisabled = trust.loading;
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -211,9 +228,9 @@ export function OrdersPage() {
       // Portfolio stack: gateway /api/demo-commerce is the order source of truth.
       // Legacy /api/seller/orders only when an external UCP base is configured.
       try {
-        const commerceOrders = await listCommerceSellerOrders(walletAddress || undefined);
+        const commerceOrders = await withOrderLoadTimeout(listCommerceSellerOrders());
         setOrders(commerceOrders);
-        setUsingLocalOrderCache(false);
+        setLastUpdatedAt(new Date());
         return;
       } catch (primaryErr) {
         if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
@@ -225,11 +242,10 @@ export function OrdersPage() {
           }
           const data = await response.json();
           setOrders(data.orders || []);
-          setUsingLocalOrderCache(false);
+          setLastUpdatedAt(new Date());
           return;
         }
-        setOrders(listDemoSellerOrders());
-        setUsingLocalOrderCache(true);
+        throw primaryErr;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load orders');
@@ -244,56 +260,24 @@ export function OrdersPage() {
 
   const handleAccept = useCallback(
     async (orderId: string) => {
-      if (
-        !elevatedTrustSatisfied(trust.state, principalId) &&
-        !canExecuteSellerAction('order_accept', trust.state)
-      ) {
-        const reason = 'Verified seller trust is required before accepting orders.';
-        recordSellerActionAuditEvent({
-          action: 'order_accept',
-          targetId: orderId,
-          walletAddress,
-          subjectId,
-          trustState: trust.state,
-          outcome: 'blocked',
-          reason,
-        });
-        setError(reason);
-        return;
-      }
-
       setProcessing(orderId);
       try {
-        try {
-          await transitionCommerceSellerOrder(orderId, 'accepted');
-          await loadOrders();
-        } catch {
-          if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
-            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/accept`), {
-              method: 'POST',
-              credentials: 'include',
-              headers: buildSellerActionHeaders(
-                buildSellerBackendActionPolicy('order_accept', {
-                  trustState: trust.state,
-                  walletAddress,
-                  subjectId,
-                  auditSubjectId: orderId,
-                })
-              ),
-            });
-            if (!response.ok) {
-              throw new Error('Failed to accept order');
-            }
-            await loadOrders();
-          } else {
-            const next = acceptDemoSellerOrder(orderId);
-            if (!next) {
-              throw new Error('Order not found');
-            }
-            setOrders(listDemoSellerOrders());
-            setUsingLocalOrderCache(true);
-          }
+        const executed = await executeProtectedAction({
+          walletAddress,
+          action: 'seller.order.accept',
+          amountInr: 0,
+          resourceId: orderId,
+          idempotencyKey: `seller.order.accept:${orderId}`,
+          payload: { order_id: orderId },
+        });
+        if (!executed.execution) {
+          throw new Error(
+            executed.decision === 'need_approval'
+              ? 'Order acceptance requires exact approval.'
+              : 'Order acceptance was denied by AgentGuard.'
+          );
         }
+        await loadOrders();
         recordSellerActionAuditEvent({
           action: 'order_accept',
           targetId: orderId,
@@ -309,66 +293,36 @@ export function OrdersPage() {
         setProcessing(null);
       }
     },
-    [loadOrders, principalId, subjectId, trust.state, walletAddress]
+    [loadOrders, subjectId, trust.state, walletAddress]
   );
 
   const handleReject = useCallback(
     async (orderId: string) => {
-      if (!window.confirm('Are you sure you want to reject this order?')) {
-        return;
-      }
       if (
-        !elevatedTrustSatisfied(trust.state, principalId) &&
-        !canExecuteSellerAction('order_reject', trust.state)
+        !window.confirm(
+          `Reject order ${customerReference(orderId)}? The customer order will be cancelled. This cannot be undone.`
+        )
       ) {
-        const reason = 'Verified seller trust is required before rejecting orders.';
-        recordSellerActionAuditEvent({
-          action: 'order_reject',
-          targetId: orderId,
-          walletAddress,
-          subjectId,
-          trustState: trust.state,
-          outcome: 'blocked',
-          reason,
-        });
-        setError(reason);
         return;
       }
-
       setProcessing(orderId);
       try {
-        try {
-          await transitionCommerceSellerOrder(orderId, 'rejected');
-          await loadOrders();
-        } catch {
-          if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
-            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${orderId}/reject`), {
-              method: 'POST',
-              credentials: 'include',
-              headers: buildSellerActionHeaders(
-                buildSellerBackendActionPolicy('order_reject', {
-                  trustState: trust.state,
-                  walletAddress,
-                  subjectId,
-                  auditSubjectId: orderId,
-                  auditReferenceId: 'seller-rejection',
-                })
-              ),
-              body: JSON.stringify({ reason: 'Seller rejected' }),
-            });
-            if (!response.ok) {
-              throw new Error('Failed to reject order');
-            }
-            await loadOrders();
-          } else {
-            const next = rejectDemoSellerOrder(orderId, 'Seller rejected');
-            if (!next) {
-              throw new Error('Order not found');
-            }
-            setOrders(listDemoSellerOrders());
-            setUsingLocalOrderCache(true);
-          }
+        const executed = await executeProtectedAction({
+          walletAddress,
+          action: 'seller.order.reject',
+          amountInr: 0,
+          resourceId: orderId,
+          idempotencyKey: `seller.order.reject:${orderId}`,
+          payload: { order_id: orderId, reason: 'Seller rejected' },
+        });
+        if (!executed.execution) {
+          throw new Error(
+            executed.decision === 'need_approval'
+              ? 'Order rejection requires exact approval.'
+              : 'Order rejection was denied by AgentGuard.'
+          );
         }
+        await loadOrders();
         recordSellerActionAuditEvent({
           action: 'order_reject',
           targetId: orderId,
@@ -384,7 +338,7 @@ export function OrdersPage() {
         setProcessing(null);
       }
     },
-    [loadOrders, principalId, subjectId, trust.state, walletAddress]
+    [loadOrders, subjectId, trust.state, walletAddress]
   );
 
   const handleViewDetails = useCallback(
@@ -402,11 +356,6 @@ export function OrdersPage() {
         title="Incoming Orders"
         subtitle="Manage and track buyer demand without leaving the trust-aware seller shell."
       />
-      {usingLocalOrderCache ? (
-        <div className="mb-4">
-          <Badge tone="warning">Demo (local cache)</Badge>
-        </div>
-      ) : null}
       <TrustNotice
         state={effectiveElevatedTrustState(trust.state, principalId)}
         loading={trust.loading}
@@ -419,7 +368,7 @@ export function OrdersPage() {
         <AsyncState
           kind="loading"
           title="Loading orders"
-          description="Pulling the latest order queue into the seller shell."
+          description="Pulling the latest order queue. If it takes longer than 10 seconds, a Retry action will appear."
         />
       ) : error ? (
         <AsyncState
@@ -434,6 +383,11 @@ export function OrdersPage() {
         />
       ) : (
         <div className="space-y-6">
+          <p className="text-sm text-muted-foreground" role="status">
+            {lastUpdatedAt
+              ? `Order queue updated at ${lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+              : 'Order queue has not been updated yet.'}
+          </p>
           <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1">
             {filterOptions.map((filterOption) => {
               const count = countOrdersByFilter(orders, filterOption);
@@ -464,7 +418,7 @@ export function OrdersPage() {
               title={filter === 'all' ? 'No incoming orders yet' : `No ${filter} orders`}
               description={
                 filter === 'all'
-                  ? 'Orders will appear here once buyers place them through the ONDC network.'
+                  ? 'Orders will appear here once buyers place them through ONDC.'
                   : `There are no ${filter} orders in the queue right now.`
               }
             />

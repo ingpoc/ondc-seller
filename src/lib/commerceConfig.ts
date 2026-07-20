@@ -20,9 +20,8 @@ export const COMMERCE_DEMO_MODE = COMMERCE_DEMO_MODE_OVERRIDE === 'true' || (
 
 export const COMMERCE_API_BASE = COMMERCE_DEMO_MODE ? '' : commerceApiBase;
 
-/** Exchange label: Simulated only when demo mode is on; live builds show ONDC network. */
 export const COMMERCE_EXCHANGE_LABEL = COMMERCE_DEMO_MODE
-  ? 'Simulated exchange'
+  ? 'Local exchange'
   : 'ONDC network';
 
 export function buildCommerceUrl(endpoint: string): string {

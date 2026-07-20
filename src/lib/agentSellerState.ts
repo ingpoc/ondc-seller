@@ -1,13 +1,11 @@
 import type { BecknItem, UCPOrder } from '@ondc-sdk/shared';
 import type { ProductFormData } from '@/components/ProductForm';
-import { getDemoCatalogItems, saveDemoCatalogItems } from './mockCatalog';
 import { getLocalSellerConfigSummary } from './localSellerConfig';
 import { clearSellerAgentDraft, readSellerAgentDraft, saveSellerAgentDraft } from './localSellerDraft';
 import {
   addSellerOrderNote,
-  listDemoSellerOrders,
   listSellerOrderNotes,
-} from './localSellerOrders';
+} from './localSellerNotes';
 import {
   listSellerActionAuditEvents,
   recordSellerActionAuditEvent,
@@ -134,9 +132,9 @@ export function buildSellerAgentSnapshot({
   catalogItems?: BecknItem[] | null;
   orderItems?: UCPOrder[] | null;
 }): SellerAgentSnapshot {
-  const catalog = catalogItems ?? getDemoCatalogItems();
+  const catalog = catalogItems ?? [];
   const pendingDraft = readSellerAgentDraft()?.draft ?? null;
-  const orders = orderItems ?? listDemoSellerOrders();
+  const orders = orderItems ?? [];
 
   return {
     route: {
@@ -172,7 +170,11 @@ function toDraftFormData(itemId: string, existingItem?: BecknItem | null): Produ
     description: existingItem?.descriptor?.short_desc ?? existingItem?.description ?? '',
     price: existingItem?.price?.value ?? '',
     currency: existingItem?.price?.currency ?? 'INR',
-    categoryId: existingItem?.category_id ?? 'cat-1',
+    categoryId: existingItem?.category_id ?? 'Grocery',
+    inventory: String(existingItem?.quantity ?? 0),
+    imageUrl: existingItem?.images?.[0]?.url ?? '',
+    imageCaption: existingItem?.imageCaption ?? '',
+    deliveryAreas: existingItem?.deliveryAreas?.join(', ') ?? '',
   };
 }
 
@@ -286,9 +288,7 @@ function normalizeDraftListingAction(
   const explicitDraft = safeRecord(candidate.draft);
   const fieldsToReview = safeRecord(candidate.fields_to_review);
   const targetItemId = safeString(candidate.target_item_id ?? candidate.item_id ?? explicitDraft?.id);
-  const existingItem = targetItemId
-    ? getDemoCatalogItems().find((item) => item.id === targetItemId) ?? null
-    : null;
+  const existingItem = null;
   const baseDraft = toDraftFormData(targetItemId || explicitDraft?.id ? safeString(targetItemId || explicitDraft?.id) : `item-${Date.now()}`, existingItem);
   const parsedPrice = parseCurrencyAndValue(
     explicitDraft?.price ?? fieldsToReview?.price,
@@ -313,6 +313,7 @@ function normalizeDraftListingAction(
       price: parsedPrice.value,
       currency: parsedPrice.currency,
       categoryId: safeString(explicitDraft?.categoryId ?? fieldsToReview?.category, baseDraft.categoryId),
+      inventory: safeString(explicitDraft?.inventory, baseDraft.inventory ?? '0'),
     },
   };
 }
@@ -425,9 +426,13 @@ export function extractSellerAgentEnvelope(rawContent: string): SellerAgentRespo
 export function applySellerAgentEnvelope(
   envelope: SellerAgentResponseEnvelope,
   trustState: PortfolioTrustState,
-  options: { approved?: boolean; actor?: Omit<SellerActionContext, 'trustState'> } = {},
+  options: {
+    approved?: boolean;
+    actor?: Omit<SellerActionContext, 'trustState'>;
+    catalogItems?: BecknItem[];
+  } = {},
 ): SellerAgentPatchResult {
-  const nextCatalog = getDemoCatalogItems();
+  const nextCatalog = [...(options.catalogItems ?? [])];
   const flagDiagnostics: SellerCatalogDiagnostic[] = [];
   let navigateTo: string | null = null;
   let trustBlockReason: string | null = null;
@@ -576,8 +581,6 @@ export function applySellerAgentEnvelope(
     }
   }
 
-  saveDemoCatalogItems(nextCatalog);
-
   const pendingDraft = readSellerAgentDraft()?.draft ?? null;
   return {
     summary: envelope.summary,
@@ -625,9 +628,4 @@ export function getDraftFormDataForRoute({
   }
 
   return null;
-}
-
-export function buildDraftFromCatalogItem(itemId: string) {
-  const existing = getDemoCatalogItems().find((item) => item.id === itemId) ?? null;
-  return toDraftFormData(itemId, existing);
 }

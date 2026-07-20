@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { TrustNotice } from '@/components/TrustStatus';
 import { useSubject, useTrustState } from '@/hooks';
+import type {
+  AgentGuardAction,
+  AgentRef,
+  IntentReceipt,
+  Mandate,
+} from '@aadharchain/agentguard-contract';
 import {
   ensureAgentGuard,
   fetchAgentGuardStatus,
@@ -12,22 +18,21 @@ import {
   executeProtectedAction,
   pauseAgent,
   resumeAgent,
-  type AgentGuardAgent,
-  type AgentGuardMandate,
-  type AgentGuardPolicy,
-  type AgentGuardReceipt,
 } from '@/lib/agentGuardClient';
 import {
   emptySamanthaMemory,
   loadSamanthaMemoryMerged,
+  memoryIsEmpty,
   saveSamanthaMemory,
   type SamanthaMemory,
 } from '@/lib/samanthaMemory';
 import { COMMERCE_EXCHANGE_LABEL } from '@/lib/commerceConfig';
+import { customerReference } from '@/lib/displayText';
 import { effectiveElevatedTrustState } from '@/lib/trust';
 
-const SELLER_ACTION_OPTIONS: { id: string; label: string }[] = [
+const SELLER_ACTION_OPTIONS: { id: AgentGuardAction; label: string }[] = [
   { id: 'seller.catalog.publish', label: 'Publish catalog' },
+  { id: 'seller.catalog.archive', label: 'Archive catalog' },
   { id: 'seller.price.change', label: 'Change price' },
   { id: 'seller.inventory.commit', label: 'Commit inventory' },
   { id: 'seller.order.accept', label: 'Accept orders' },
@@ -37,13 +42,27 @@ const SELLER_ACTION_OPTIONS: { id: string; label: string }[] = [
   { id: 'seller.refund.issue', label: 'Issue refund' },
 ];
 
-function refundMaxFromMandate(
-  mandate: AgentGuardMandate | null,
-  policy: AgentGuardPolicy | null
-): number {
+function refundMaxFromMandate(mandate: Mandate | null): number {
   const auto = mandate?.limits?.auto_approve_max_inr as Record<string, number> | undefined;
   if (auto?.['seller.refund.issue'] != null) return Number(auto['seller.refund.issue']);
-  return policy?.refund_auto_max_inr ?? 5000;
+  return 5000;
+}
+
+async function withAuthorityLoadTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Authority status timed out. Retry to request the current state.')),
+          10_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function AgentGuardPage() {
@@ -55,17 +74,18 @@ export function AgentGuardPage() {
   const pendingResource = searchParams.get('resource');
   const { walletAddress, subjectId, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
-  const [agent, setAgent] = useState<AgentGuardAgent | null>(null);
-  const [mandate, setMandate] = useState<AgentGuardMandate | null>(null);
-  const [receipts, setReceipts] = useState<AgentGuardReceipt[]>([]);
+  const [agent, setAgent] = useState<AgentRef | null>(null);
+  const [mandate, setMandate] = useState<Mandate | null>(null);
+  const [receipts, setReceipts] = useState<IntentReceipt[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [refundAutoMax, setRefundAutoMax] = useState(5000);
-  const [selectedActions, setSelectedActions] = useState<string[]>(
+  const [selectedActions, setSelectedActions] = useState<AgentGuardAction[]>(
     SELLER_ACTION_OPTIONS.map((a) => a.id)
   );
   const [memory, setMemory] = useState<SamanthaMemory>(emptySamanthaMemory());
   const [approving, setApproving] = useState(false);
+  const authorityReady = !busy && agent !== null && mandate !== null;
 
   const refresh = useCallback(async () => {
     setMemory(loadSamanthaMemoryMerged(subjectId));
@@ -78,13 +98,19 @@ export function AgentGuardPage() {
     setBusy(true);
     setError(null);
     try {
-      const ensured = await ensureAgentGuard(walletAddress);
-      const status = await fetchAgentGuardStatus(walletAddress);
-      setAgent(status.agent);
-      const nextMandate = ensured.mandate ?? status.mandate ?? null;
+      const { ensured, status } = await withAuthorityLoadTimeout(
+        (async () => {
+          const ensured = await ensureAgentGuard(walletAddress);
+          const status = await fetchAgentGuardStatus(walletAddress);
+          return { ensured, status };
+        })(),
+      );
+      const nextAgent = status.agent ?? ensured.agent ?? null;
+      const nextMandate = status.mandate ?? ensured.mandate ?? null;
+      setAgent(nextAgent);
       setMandate(nextMandate);
       setReceipts(status.receipts ?? []);
-      setRefundAutoMax(refundMaxFromMandate(nextMandate, status.policy));
+      setRefundAutoMax(refundMaxFromMandate(nextMandate));
       if (nextMandate?.allowed_actions?.length) {
         setSelectedActions(nextMandate.allowed_actions);
       }
@@ -153,7 +179,7 @@ export function AgentGuardPage() {
   }
 
   async function handleConfirmMandate() {
-    if (!subjectId) return;
+    if (!subjectId || !agent || !mandate) return;
     setBusy(true);
     setError(null);
     try {
@@ -175,13 +201,17 @@ export function AgentGuardPage() {
     }
   }
 
-  function toggleAction(id: string) {
+  function toggleAction(id: AgentGuardAction) {
     setSelectedActions((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }
 
   function clearMemory() {
+    const confirmed = window.confirm(
+      'Clear all Samantha memory for this signed-in seller? This removes saved likes, dislikes, preferences, and notes used in future assistant suggestions. Catalog, orders, and AgentGuard authority will not change.',
+    );
+    if (!confirmed) return;
     setMemory(saveSamanthaMemory(subjectId, emptySamanthaMemory()));
   }
 
@@ -197,10 +227,11 @@ export function AgentGuardPage() {
     <div className="mx-auto flex w-full max-w-[960px] flex-col gap-8 px-4 py-8 sm:px-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-          AgentGuard authority
+          Assistant permissions
         </h1>
         <p className="max-w-[55ch] text-base leading-relaxed text-muted-foreground">
-          Configure what the store agent may do. AgentGuard enforces limits, not the model.
+          Samantha is your Seller operations assistant. Set which protected actions she may carry
+          out; AgentGuard checks every action independently.
         </p>
       </div>
 
@@ -217,7 +248,9 @@ export function AgentGuardPage() {
                 : 'Refund blocked by AgentGuard'}
           </p>
           {latestReceipt ? (
-            <p className="mt-1 text-muted-foreground">Receipt {latestReceipt}</p>
+            <p className="mt-1 text-muted-foreground">
+              Authorization reference {customerReference(latestReceipt)}
+            </p>
           ) : null}
           {latestOutcome === 'need_approval' && pendingApproval ? (
             <Button
@@ -253,9 +286,27 @@ export function AgentGuardPage() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Edit mandate</CardTitle>
+              <h2 className="font-heading text-base font-medium">Current authority</h2>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              {!authorityReady ? (
+                <div className="space-y-3" role="status" data-testid="agentguard-loading-state">
+                  <p className="font-medium text-foreground">
+                    {busy ? 'Loading current authority…' : 'Current authority is unavailable.'}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Protected controls remain unavailable until the agent and mandate status are
+                    known. This usually takes a few seconds; if it exceeds 10 seconds, a retry
+                    action appears.
+                  </p>
+                  {!busy ? (
+                    <Button type="button" variant="secondary" onClick={() => void refresh()}>
+                      Retry authority status
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <>
               <label className="block space-y-2" data-testid="agentguard-refund-limit">
                 <span className="text-muted-foreground">Auto-approve refunds up to (INR)</span>
                 <input
@@ -264,6 +315,7 @@ export function AgentGuardPage() {
                   step={100}
                   className="quant w-full rounded-xl border border-border bg-background px-3 py-2"
                   value={refundAutoMax}
+                  disabled={!authorityReady}
                   onChange={(e) => setRefundAutoMax(Number(e.target.value) || 0)}
                   data-testid="agentguard-refund-max-input"
                 />
@@ -276,6 +328,7 @@ export function AgentGuardPage() {
                       <input
                         type="checkbox"
                         checked={selectedActions.includes(opt.id)}
+                        disabled={!authorityReady}
                         onChange={() => toggleAction(opt.id)}
                         data-testid={`agentguard-action-${opt.id}`}
                       />
@@ -288,30 +341,46 @@ export function AgentGuardPage() {
                 {summary}
               </p>
               <p data-testid="agentguard-policy">
-                Routine refunds up to <strong className="quant">INR {refundAutoMax}</strong> may
-                execute automatically. Larger refunds require one-time approval.
+                {busy ? (
+                  <>Loading current authority. Changes remain unavailable until its status is known.</>
+                ) : agent?.status === 'paused' ? (
+                  <>The agent is paused. Protected seller actions will not execute until you resume it.</>
+                ) : mandate?.status === 'active' ? (
+                  <>
+                    When you choose a refund at or below{' '}
+                    <strong className="quant">INR {refundAutoMax}</strong>, it executes
+                    immediately. A larger refund stops for one-time approval before execution.
+                  </>
+                ) : (
+                  <>Save these settings to activate seller authority.</>
+                )}
               </p>
               <p className="text-muted-foreground">
-                Agent: {agent?.name ?? '—'} · Status:{' '}
-                <span data-testid="agentguard-status">{agent?.status ?? '—'}</span>
+                Assistant: Samantha · Role: Seller operations · Status:{' '}
+                <span data-testid="agentguard-status">{busy && !agent ? 'loading' : agent?.status ?? 'unavailable'}</span>
               </p>
               <p className="text-muted-foreground">
                 Mandate:{' '}
                 <span data-testid="agentguard-mandate-status">
-                  {mandate?.status ?? 'template ready'}
+                  {busy && !mandate ? 'loading' : mandate?.status ?? 'not active'}
                 </span>{' '}
-                · {COMMERCE_EXCHANGE_LABEL}; payment rails simulated (not live UPI)
+                · {COMMERCE_EXCHANGE_LABEL}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
                   data-testid="agentguard-confirm-mandate"
-                  disabled={busy || !subjectId || selectedActions.length === 0}
+                  disabled={!authorityReady || !subjectId || selectedActions.length === 0}
                   onClick={() => void handleConfirmMandate()}
                 >
-                  Confirm mandate
+                  {busy
+                    ? 'Loading authority…'
+                    : mandate?.status === 'active'
+                      ? 'Save authority changes'
+                      : 'Activate authority'}
                 </Button>
                 <Button
                   data-testid="agentguard-pause"
+                  aria-describedby="agentguard-pause-consequences"
                   disabled={busy || !agent}
                   variant={agent?.status === 'paused' ? 'default' : 'outline'}
                   onClick={() => void handlePauseToggle()}
@@ -321,16 +390,24 @@ export function AgentGuardPage() {
                 <Button variant="secondary" disabled={busy} onClick={() => void refresh()}>
                   Refresh
                 </Button>
-                <Button asChild variant="outline">
-                  <Link to="/orders/seller-demo-1002">Try refunds on demo order</Link>
-                </Button>
               </div>
+              <p id="agentguard-pause-consequences" className="text-muted-foreground">
+                Pausing stops Samantha from executing protected catalog, order, fulfilment, and
+                refund actions. She may still answer questions; your saved permissions remain and
+                take effect again when you resume.
+              </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
           <Card data-testid="seller-config-samantha">
             <CardHeader>
-              <CardTitle>Samantha memory</CardTitle>
+              <h2 className="font-heading text-base font-medium">Samantha memory</h2>
+              <CardDescription id="seller-samantha-memory-scope">
+                Saved only for this signed-in seller and used for future assistant suggestions.
+                Removing it does not change catalog, orders, or AgentGuard authority.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {(
@@ -352,7 +429,9 @@ export function AgentGuardPage() {
                           <button
                             type="button"
                             className="rounded-full border border-border px-2 py-0.5 text-xs hover:bg-muted"
-                            title="Remove"
+                            aria-label={`Remove ${label.toLowerCase()} “${item}” from Samantha memory`}
+                            aria-describedby="seller-samantha-memory-scope"
+                            title={`Remove from ${label.toLowerCase()}`}
                             onClick={() => removeFact(key, item)}
                           >
                             {item} ×
@@ -363,15 +442,22 @@ export function AgentGuardPage() {
                   )}
                 </div>
               ))}
-              <Button type="button" size="sm" variant="outline" onClick={clearMemory}>
-                Clear memory
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-describedby="seller-samantha-memory-scope"
+                disabled={memoryIsEmpty(memory)}
+                onClick={clearMemory}
+              >
+                Clear all Samantha memory
               </Button>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Receipts (PII-free)</CardTitle>
+              <h2 className="font-heading text-base font-medium">Receipts (PII-free)</h2>
             </CardHeader>
             <CardContent className="space-y-3" data-testid="agentguard-receipts">
               {receipts.length === 0 ? (
@@ -388,7 +474,8 @@ export function AgentGuardPage() {
                       {receipt.outcome}
                     </p>
                     <p className="quant text-muted-foreground">
-                      {receipt.receipt_id} · {receipt.resource_id}
+                      Authorization {customerReference(receipt.receipt_id)} · order{' '}
+                      {customerReference(receipt.resource_id)}
                     </p>
                   </div>
                 ))

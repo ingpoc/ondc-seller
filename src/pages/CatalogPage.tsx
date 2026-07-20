@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { BecknItem } from '@ondc-sdk/shared';
 import {
   AsyncState,
+  Alert,
   Badge,
   Button,
   Card,
@@ -15,15 +16,14 @@ import { useSubject } from '../hooks/useSubject';
 import { useTrustState } from '../hooks/useTrustState';
 import { InventoryTable } from '../components';
 import { TrustNotice } from '../components/TrustStatus';
-import { elevatedTrustSatisfied } from '../lib/trust';
-import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
-import { deleteDemoCatalogItem } from '../lib/mockCatalog';
+import { effectiveElevatedTrustState, elevatedTrustSatisfied } from '../lib/trust';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
+import { executeProtectedAction } from '../lib/agentGuardClient';
+import { assertSellerActionAllowed } from '../lib/sellerActionPolicy';
 import {
-  assertSellerActionAllowed,
-  buildSellerActionHeaders,
-  buildSellerBackendActionPolicy,
-} from '../lib/sellerActionPolicy';
+  notifySellerCatalogChanged,
+  SELLER_CATALOG_CHANGED_EVENT,
+} from '../lib/sellerCatalogEvents';
 
 type CatalogItem = BecknItem & {
   quantity?: number;
@@ -48,12 +48,15 @@ function formatCategory(categoryId?: string | null) {
 
 export function CatalogPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim().toLowerCase();
   const { subjectId, walletAddress, principalId } = useSubject();
   const trust = useTrustState(walletAddress);
   const { data, loading, error, execute } = useApi('/api/catalog');
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const trustBlocksCatalog = !trust.loading && !elevatedTrustSatisfied(trust.state, principalId);
+  const catalogNotice = (location.state as { catalogNotice?: string } | null)?.catalogNotice;
 
   useEffect(() => {
     void execute();
@@ -61,8 +64,8 @@ export function CatalogPage() {
 
   useEffect(() => {
     const refreshPublishedCatalog = () => void execute();
-    window.addEventListener('seller-catalog-changed', refreshPublishedCatalog);
-    return () => window.removeEventListener('seller-catalog-changed', refreshPublishedCatalog);
+    window.addEventListener(SELLER_CATALOG_CHANGED_EVENT, refreshPublishedCatalog);
+    return () => window.removeEventListener(SELLER_CATALOG_CHANGED_EVENT, refreshPublishedCatalog);
   }, [execute]);
 
   const items = useMemo(
@@ -116,77 +119,82 @@ export function CatalogPage() {
   const handleDelete = useCallback(
     async (itemId: string) => {
       if (trustBlocksCatalog) {
+        setArchiveError('Sign in with a verified seller session before archiving products.');
         return;
       }
+      const policyTrust = effectiveElevatedTrustState(trust.state, principalId);
       try {
         assertSellerActionAllowed('catalog_delete', {
-          trustState: trust.state,
+          trustState: policyTrust,
           walletAddress,
           subjectId,
         });
       } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Catalog delete blocked.';
         recordSellerActionAuditEvent({
           action: 'catalog_delete',
           targetId: itemId,
           walletAddress,
           subjectId,
-          trustState: trust.state,
+          trustState: policyTrust,
           outcome: 'blocked',
-          reason: error instanceof Error ? error.message : 'Catalog delete blocked.',
+          reason,
         });
+        setArchiveError(reason);
         return;
       }
 
-      const confirmed = window.confirm('Delete this product from the catalog?');
+      const confirmed = window.confirm(
+        'Archive this listing? Buyers will no longer see it. Publish it again to restore buyer visibility.'
+      );
       if (!confirmed) {
         return;
       }
 
-      if (COMMERCE_DEMO_MODE) {
-        deleteDemoCatalogItem(itemId);
+      setArchiveError(null);
+      try {
+        const executed = await executeProtectedAction({
+          walletAddress,
+          action: 'seller.catalog.archive',
+          amountInr: 0,
+          resourceId: itemId,
+          idempotencyKey: `seller.catalog.archive:${itemId}:${crypto.randomUUID()}`,
+          payload: { item_id: itemId },
+        });
+        if (!executed.execution) {
+          throw new Error(
+            executed.decision === 'need_approval'
+              ? 'Catalog archive requires exact AgentGuard approval. Enable Archive catalog on AgentGuard.'
+              : 'Catalog archive was denied by AgentGuard.'
+          );
+        }
         recordSellerActionAuditEvent({
           action: 'catalog_delete',
           targetId: itemId,
           walletAddress,
           subjectId,
-          trustState: trust.state,
+          trustState: policyTrust,
           outcome: 'applied',
-          reason: 'Deleted seller catalog item locally.',
+          reason: 'Archived seller catalog item through AgentGuard.',
         });
+        notifySellerCatalogChanged();
         await execute();
-        return;
+      } catch (error) {
+        const reason =
+          error instanceof Error ? error.message : 'Catalog archive failed. Try again.';
+        recordSellerActionAuditEvent({
+          action: 'catalog_delete',
+          targetId: itemId,
+          walletAddress,
+          subjectId,
+          trustState: policyTrust,
+          outcome: 'blocked',
+          reason,
+        });
+        setArchiveError(reason);
       }
-
-      const response = await fetch(buildCommerceUrl(`/api/catalog/products/${itemId}`), {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: buildSellerActionHeaders(
-          buildSellerBackendActionPolicy('catalog_delete', {
-            trustState: trust.state,
-            walletAddress,
-            subjectId,
-            auditSubjectId: itemId,
-            auditReferenceId: 'catalog-delete',
-          })
-        ),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete product ${itemId}`);
-      }
-      recordSellerActionAuditEvent({
-        action: 'catalog_delete',
-        targetId: itemId,
-        walletAddress,
-        subjectId,
-        trustState: trust.state,
-        outcome: 'applied',
-        reason: 'Deleted seller catalog item through commerce API.',
-      });
-
-      await execute();
     },
-    [execute, subjectId, trust.state, trustBlocksCatalog, walletAddress]
+    [execute, principalId, subjectId, trust.state, trustBlocksCatalog, walletAddress]
   );
 
   return (
@@ -195,6 +203,26 @@ export function CatalogPage() {
       subtitle="Review what buyers can find, then update the product that needs attention."
       showHeader
     >
+      {catalogNotice ? (
+        <div role="status" aria-live="polite">
+          <Alert
+            tone="success"
+            title="Catalog saved"
+            description={catalogNotice}
+            className="mb-6"
+          />
+        </div>
+      ) : null}
+      {archiveError ? (
+        <div role="alert" aria-live="assertive">
+          <Alert
+            tone="error"
+            title="Could not archive product"
+            description={archiveError}
+            className="mb-6"
+          />
+        </div>
+      ) : null}
       <Section
         eyebrow="Seller catalog"
         actions={
@@ -203,9 +231,11 @@ export function CatalogPage() {
             <Button type="button" variant="secondary" onClick={() => void execute()}>
               Refresh catalog
             </Button>
-            <Button type="button" onClick={handleAdd} disabled={trustBlocksCatalog}>
-              Add product
-            </Button>
+            {items.length > 0 || query ? (
+              <Button type="button" onClick={handleAdd} disabled={trustBlocksCatalog}>
+                Add product
+              </Button>
+            ) : null}
           </div>
         }
       >
@@ -247,7 +277,13 @@ export function CatalogPage() {
           <StatCard
             label="Edit access"
             value={trust.loading ? 'Checking' : !trustBlocksCatalog ? 'Ready' : 'Sign in needed'}
-            hint={trust.reason ?? 'Sign in to add or edit products'}
+            hint={
+              trust.loading
+                ? 'Checking your catalog permissions'
+                : !trustBlocksCatalog
+                  ? 'Signed in; catalog changes are protected by AgentGuard'
+                  : (trust.reason ?? 'Sign in to add or edit products')
+            }
             tone={!trustBlocksCatalog ? 'success' : 'warning'}
           />
         </div>
@@ -339,12 +375,12 @@ export function CatalogPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex gap-8">
                           <div>
-                          <div className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
-                            Price
-                          </div>
-                          <div className="mt-1 text-lg font-bold tracking-[-0.03em] text-[var(--ui-text)]">
-                            {item.price?.currency ?? 'INR'} {item.price?.value ?? '0'}
-                          </div>
+                            <div className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
+                              Price
+                            </div>
+                            <div className="mt-1 text-lg font-bold tracking-[-0.03em] text-[var(--ui-text)]">
+                              {item.price?.currency ?? 'INR'} {item.price?.value ?? '0'}
+                            </div>
                           </div>
                           <div>
                             <div className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ui-text-muted)]">
@@ -359,6 +395,7 @@ export function CatalogPage() {
                           type="button"
                           variant="secondary"
                           size="sm"
+                          aria-label={`Edit featured listing ${item.descriptor?.name ?? 'untitled product'}`}
                           disabled={trustBlocksCatalog}
                           onClick={(event) => {
                             event.stopPropagation();

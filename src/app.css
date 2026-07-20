@@ -187,30 +187,32 @@
   }
 }
 
+/* One big pill track (Autonomous Agent Builder NavPills pattern). */
+.nav-track {
+  @apply inline-flex items-center gap-1 rounded-full border border-border/75 bg-background/70 p-1.5;
+}
+
 .nav-pill {
-  @apply inline-flex h-9 items-center rounded-full px-3.5 text-sm font-medium text-foreground/80 transition-all duration-200;
+  @apply inline-flex h-8 items-center whitespace-nowrap rounded-full px-4 text-xs font-medium text-muted-foreground transition-colors duration-200;
   transition-timing-function: var(--ease-taste);
-  background: oklch(0.955 0.006 240);
+  background: transparent;
 }
 
 .nav-pill:hover {
-  background: oklch(0.94 0.008 240);
+  @apply text-foreground;
 }
 
-.nav-pill[data-active='true'] {
+.nav-pill:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.nav-pill[aria-current='page'] {
   @apply bg-primary text-primary-foreground shadow-sm;
-  box-shadow: 0 2px 8px oklch(0.48 0.07 195 / 0.28);
+  box-shadow: var(--shadow-md, 0 2px 8px oklch(0.48 0.07 195 / 0.28));
 }
 
-.dark .nav-pill {
-  background: oklch(0.26 0.01 250);
-}
-
-.dark .nav-pill:hover {
-  background: oklch(0.3 0.012 250);
-}
-
-.dark .nav-pill[data-active='true'] {
+.dark .nav-pill[aria-current='page'] {
   @apply bg-primary text-primary-foreground;
 }
 

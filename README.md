@@ -1,6 +1,6 @@
 # ONDC UCP Seller Portal
 
-`ondc-seller` is the portfolio **ONDC Seller** app under **AgentGuard**. Authorization is session principal (Google / demo) via the gateway; legacy wallet KYC hangar is optional.
+`ondc-seller` is the portfolio **ONDC Seller** app under **AgentGuard**. Authorization uses the signed gateway session principal; legacy wallet KYC hangar is optional.
 
 It does not verify identity documents and does not operate a separate identity product UX.
 
@@ -15,7 +15,7 @@ It does not verify identity documents and does not operate a separate identity p
 ## Environment
 
 ```env
-# Leave unset — do NOT use :3001. Vite /api → gateway :43101; orders via /api/demo-commerce/seller/orders
+# Leave unset — do NOT use :3001. Vite /api → gateway :43101; signed-session orders route through the gateway.
 # VITE_API_BASE_URL=
 VITE_IDENTITY_URL=http://127.0.0.1:43101
 VITE_TRUST_API_URL=http://127.0.0.1:43101

@@ -17,6 +17,10 @@ export interface ProductFormData {
   price: string;
   currency: string;
   categoryId: string;
+  inventory?: string;
+  imageUrl?: string;
+  imageCaption?: string;
+  deliveryAreas?: string;
 }
 
 export interface ProductFormProps {
@@ -28,10 +32,10 @@ export interface ProductFormProps {
 }
 
 const CATEGORY_OPTIONS = [
-  { value: 'cat-1', label: 'Grocery' },
-  { value: 'cat-2', label: 'Restaurant' },
-  { value: 'cat-3', label: 'Fashion' },
-  { value: 'cat-4', label: 'Electronics' },
+  { value: 'Grocery', label: 'Grocery' },
+  { value: 'Restaurant', label: 'Restaurant' },
+  { value: 'Fashion', label: 'Fashion' },
+  { value: 'Electronics', label: 'Electronics' },
 ] as const;
 
 const CURRENCY_OPTIONS = [
@@ -40,9 +44,31 @@ const CURRENCY_OPTIONS = [
   { value: 'EUR', label: 'EUR' },
 ] as const;
 
-function buildFormData(product?: BecknItem, initialData?: ProductFormData | null): ProductFormData {
+export function normalizeCategoryId(value?: string): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    'cat-1': 'Grocery',
+    grocery: 'Grocery',
+    'cat-2': 'Restaurant',
+    restaurant: 'Restaurant',
+    'cat-3': 'Fashion',
+    fashion: 'Fashion',
+    'cat-4': 'Electronics',
+    electronics: 'Electronics',
+  };
+  return aliases[normalized] || 'Grocery';
+}
+
+export function buildFormData(product?: BecknItem, initialData?: ProductFormData | null): ProductFormData {
   if (initialData) {
-    return initialData;
+    return {
+      ...initialData,
+      categoryId: normalizeCategoryId(initialData.categoryId),
+      inventory: String(initialData.inventory ?? '0'),
+      imageUrl: initialData.imageUrl ?? '',
+      imageCaption: initialData.imageCaption ?? '',
+      deliveryAreas: initialData.deliveryAreas ?? '',
+    };
   }
 
   return {
@@ -51,7 +77,11 @@ function buildFormData(product?: BecknItem, initialData?: ProductFormData | null
     description: product?.descriptor?.short_desc || '',
     price: product?.price?.value || '',
     currency: product?.price?.currency || 'INR',
-    categoryId: product?.category_id || 'cat-1',
+    categoryId: normalizeCategoryId(product?.category_id),
+    inventory: String((product as BecknItem & { quantity?: number })?.quantity ?? 0),
+    imageUrl: product?.images?.[0]?.url ?? '',
+    imageCaption: product?.imageCaption ?? '',
+    deliveryAreas: product?.deliveryAreas?.join(', ') ?? '',
   };
 }
 
@@ -157,6 +187,19 @@ export function ProductForm({ product, initialData, onSubmit, onCancel, loading 
           />
         </Field>
 
+        <Field label="Stock" htmlFor="product-inventory" required>
+          <Input
+            id="product-inventory"
+            type="number"
+            value={formData.inventory}
+            onChange={handleInputChange('inventory')}
+            required
+            min="0"
+            step="1"
+            inputMode="numeric"
+          />
+        </Field>
+
         <Field label="Description" htmlFor="product-description" helper="A short description improves buyer confidence." fullWidth>
           <Textarea
             id="product-description"
@@ -166,15 +209,67 @@ export function ProductForm({ product, initialData, onSubmit, onCancel, loading 
           />
         </Field>
 
-        <Field label="Price" htmlFor="product-price" required fullWidth>
+        <Field
+          label="Product image URL"
+          htmlFor="product-image-url"
+          helper="Use a clear, accurate product or ingredient photo. Leave blank when no image is available."
+          fullWidth
+        >
+          <Input
+            id="product-image-url"
+            type="url"
+            value={formData.imageUrl ?? ''}
+            onChange={handleInputChange('imageUrl')}
+            placeholder="https://example.com/product.jpg"
+          />
+        </Field>
+
+        <Field
+          label="Image note"
+          htmlFor="product-image-caption"
+          helper="Clarify when an image is an ingredient or reference photo rather than the exact packaging."
+          fullWidth
+        >
+          <Input
+            id="product-image-caption"
+            type="text"
+            value={formData.imageCaption ?? ''}
+            onChange={handleInputChange('imageCaption')}
+            placeholder="Ingredient photo; packaging may vary"
+          />
+        </Field>
+
+        <Field
+          label="Delivery areas"
+          htmlFor="product-delivery-areas"
+          helper="Comma-separated cities or PIN codes where this listing can be delivered."
+          fullWidth
+        >
+          <Input
+            id="product-delivery-areas"
+            type="text"
+            value={formData.deliveryAreas ?? ''}
+            onChange={handleInputChange('deliveryAreas')}
+            placeholder="Pune, 411001"
+          />
+        </Field>
+
+        <Field
+          label="Price"
+          htmlFor="product-price"
+          helper="Enter a whole-rupee amount. Decimal prices are not supported."
+          required
+          fullWidth
+        >
           <Input
             id="product-price"
             type="number"
             value={formData.price}
             onChange={handleInputChange('price')}
             required
-            min="0"
-            step="0.01"
+            min="1"
+            step="1"
+            inputMode="numeric"
             placeholder="100"
           />
         </Field>
@@ -192,7 +287,8 @@ export function ProductForm({ product, initialData, onSubmit, onCancel, loading 
         </div>
         <div className="flex flex-wrap gap-3 text-sm font-medium text-[var(--ui-text)]">
           <span>{formData.currency} {formData.price || '0'}</span>
-          <span>{CATEGORY_OPTIONS.find((option) => option.value === formData.categoryId)?.label ?? 'General'}</span>
+          <span>{CATEGORY_OPTIONS.find((option) => option.value === formData.categoryId)?.label ?? 'Grocery'}</span>
+          <span>{formData.inventory || '0'} in stock</span>
         </div>
       </Card>
 

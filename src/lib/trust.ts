@@ -34,7 +34,7 @@ export function elevatedTrustSatisfied(
   return sessionSkipsLegacyTrust(principalId) || trustState === 'verified';
 }
 
-/** Coerce session principals to verified for local demo policy helpers. */
+/** Coerce authenticated session principals to verified for UI policy helpers. */
 export function effectiveElevatedTrustState(
   trustState: PortfolioTrustState,
   principalId?: string | null,

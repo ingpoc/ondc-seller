@@ -8,7 +8,7 @@ import {
 } from './localSellerConfig';
 
 const validConfig: SellerClientConfig = {
-  baseUrl: 'https://gateway.ondc.org',
+  baseUrl: 'https://preprod.gateway.ondc.org',
   subscriberId: 'seller.example',
   privateKey: 'local-private-key',
   keyId: 'seller-key-1',

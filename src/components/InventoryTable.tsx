@@ -1,10 +1,5 @@
 import type { BecknItem } from '@ondc-sdk/shared';
-import {
-  AsyncState,
-  Badge,
-  Button,
-  DataTableLayout,
-} from '@/components/seller-ui';
+import { AsyncState, Badge, Button, DataTableLayout } from '@/components/seller-ui';
 
 export interface InventoryTableProps {
   items: BecknItem[];
@@ -18,9 +13,7 @@ function formatCategory(categoryId?: string | null) {
     return 'General';
   }
 
-  return categoryId
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return categoryId.replace(/[-_]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export function InventoryTable({
@@ -109,6 +102,7 @@ export function InventoryTable({
                       type="button"
                       variant="secondary"
                       size="sm"
+                      aria-label={`Edit product details for ${item.descriptor?.name ?? 'untitled product'}`}
                       onClick={() => onEdit(item)}
                       disabled={actionsDisabled}
                     >
@@ -118,10 +112,11 @@ export function InventoryTable({
                       type="button"
                       variant="danger"
                       size="sm"
+                      aria-label={`Archive ${item.descriptor?.name ?? 'untitled product'}`}
                       onClick={() => onDelete(item.id)}
                       disabled={actionsDisabled}
                     >
-                      Delete
+                      Archive
                     </Button>
                   </div>
                 </td>

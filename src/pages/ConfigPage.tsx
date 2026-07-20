@@ -35,7 +35,7 @@ interface ConfigError {
 }
 
 const INITIAL_CONFIG: SellerClientConfig = {
-  baseUrl: 'https://gateway.ondc.org',
+  baseUrl: '',
   subscriberId: '',
   privateKey: '',
   keyId: '',
@@ -257,6 +257,15 @@ export function ConfigPage() {
         );
       }
 
+      if (
+        (config.privateKey || config.keyId) &&
+        !window.confirm(
+          'Generate replacement signing keys? The current form values will be replaced, but the new keys are not active until you save the configuration.',
+        )
+      ) {
+        return;
+      }
+
       if (COMMERCE_DEMO_MODE) {
         recordSellerActionAuditEvent({
           action: 'seller_config_generate_keys',
@@ -388,11 +397,10 @@ export function ConfigPage() {
           Seller configuration
         </div>
         <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
-          Keep the seller node ready for verified operations
+          Seller connection settings
         </h1>
         <p className="max-w-3xl text-sm text-muted-foreground">
-          Configure ONDC credentials, gateway routing, and the local seller runtime context without
-          leaving the trust-aware shell.
+          Configure the ONDC network connection used for catalog, order, and fulfillment operations.
         </p>
       </div>
 
@@ -402,6 +410,21 @@ export function ConfigPage() {
         error={trust.error}
         reason={trust.reason}
       />
+
+      <Card>
+        <CardContent className="flex flex-col gap-2 p-4 text-sm">
+          <Badge className="w-fit bg-secondary text-secondary-foreground">
+            {config.baseUrl && config.subscriberId && config.privateKey && config.keyId
+              ? 'Connection details ready to test'
+              : 'Connection details incomplete'}
+          </Badge>
+          <p className="text-muted-foreground">
+            Generating a key pair only replaces the values in this form. Saving makes those
+            signing credentials active; test the connection after saving. Replacing active keys
+            can interrupt signed requests until the matching public key is registered.
+          </p>
+        </CardContent>
+      </Card>
 
       {testResult ? (
         <Card
@@ -435,7 +458,7 @@ export function ConfigPage() {
       >
         <Card>
           <CardHeader>
-            <CardTitle>ONDC credentials</CardTitle>
+            <CardTitle>ONDC network connection</CardTitle>
           </CardHeader>
           <CardContent>
             <FieldGroup>
@@ -447,7 +470,7 @@ export function ConfigPage() {
                     name="baseUrl"
                     value={config.baseUrl}
                     onChange={(event) => setConfig({ ...config, baseUrl: event.target.value })}
-                    placeholder="https://gateway.ondc.org"
+                    placeholder="https://your-ondc-gateway.example"
                     aria-invalid={!!getFieldError('baseUrl')}
                   />
                   <FieldDescription>
@@ -503,9 +526,14 @@ export function ConfigPage() {
                       disabled={!canChangeConfiguration}
                       onClick={() => void handleGenerateKeyPair()}
                     >
-                      Generate key pair
+                      {config.privateKey || config.keyId
+                        ? 'Generate replacement key pair'
+                        : 'Generate key pair'}
                     </Button>
                   </div>
+                  <FieldDescription>
+                    Generated keys are not active until you save this configuration.
+                  </FieldDescription>
                   <FieldError>{getFieldError('privateKey')}</FieldError>
                 </FieldContent>
               </Field>

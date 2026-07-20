@@ -6,8 +6,8 @@ import {
 } from './agentSellerState';
 import { clearSellerAgentDraft, readSellerAgentDraft } from './localSellerDraft';
 import { clearSellerActionAuditEvents, listSellerActionAuditEvents } from './localSellerAudit';
-import { getDemoCatalogItems, saveDemoCatalogItems } from './mockCatalog';
-import { listSellerOrderNotesForOrder } from './localSellerOrders';
+import { getDemoCatalogItems } from './mockCatalog';
+import { listSellerOrderNotesForOrder } from './localSellerNotes';
 import type { PortfolioTrustState } from './trust';
 
 const TRUST_STATES: PortfolioTrustState[] = [
@@ -21,7 +21,6 @@ const TRUST_STATES: PortfolioTrustState[] = [
 describe('agentSellerState', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    saveDemoCatalogItems(getDemoCatalogItems());
     clearSellerAgentDraft();
     clearSellerActionAuditEvents();
   });
@@ -221,7 +220,8 @@ describe('agentSellerState', () => {
   });
 
   it('blocks direct catalog patches when seller trust is not verified', () => {
-    const beforeDescription = getDemoCatalogItems()[0]?.descriptor?.short_desc;
+    const catalogItems = getDemoCatalogItems();
+    const beforeDescription = catalogItems[0]?.descriptor?.short_desc;
     const result = applySellerAgentEnvelope(
       {
         summary: 'Tried to push a live catalog edit.',
@@ -237,13 +237,15 @@ describe('agentSellerState', () => {
         ],
       },
       'identity_present_unverified',
+      { catalogItems },
     );
 
     expect(result.trustBlockReason).toMatch(/Sign in or verified trust|Verified seller trust/i);
-    expect(getDemoCatalogItems()[0]?.descriptor?.short_desc).toBe(beforeDescription);
+    expect(result.catalog[0]?.descriptor?.short_desc).toBe(beforeDescription);
   });
 
   it('applies verified catalog patches without blanking unspecified fields', () => {
+    const catalogItems = getDemoCatalogItems();
     const result = applySellerAgentEnvelope(
       {
         summary: 'Listing updated directly.',
@@ -261,11 +263,11 @@ describe('agentSellerState', () => {
         ],
       },
       'verified',
-      { approved: true },
+      { approved: true, catalogItems },
     );
 
     expect(result.trustBlockReason).toBeNull();
-    const updated = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const updated = result.catalog.find((item) => item.id === 'mustard-oil-1l');
     expect(updated?.descriptor?.name).toBe('Cold Pressed Mustard Oil 1L');
     expect(updated?.descriptor?.short_desc).toBe(
       'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
@@ -275,7 +277,8 @@ describe('agentSellerState', () => {
   });
 
   it('stages verified agent writes until the seller explicitly approves them', () => {
-    const before = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const catalogItems = getDemoCatalogItems();
+    const before = catalogItems.find((item) => item.id === 'mustard-oil-1l');
 
     const result = applySellerAgentEnvelope(
       {
@@ -295,6 +298,7 @@ describe('agentSellerState', () => {
       'verified',
       {
         approved: false,
+        catalogItems,
         actor: {
           walletAddress: 'seller-wallet-fixture',
           subjectId: 'seller-subject-fixture',
@@ -303,7 +307,7 @@ describe('agentSellerState', () => {
       },
     );
 
-    const after = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const after = result.catalog.find((item) => item.id === 'mustard-oil-1l');
     expect(result.pendingApproval).toBe(true);
     expect(after?.descriptor?.short_desc).toBe(before?.descriptor?.short_desc);
     expect(after?.price?.value).toBe(before?.price?.value);
@@ -340,10 +344,13 @@ describe('agentSellerState', () => {
     );
 
     expect(envelope).not.toBeNull();
-    const result = applySellerAgentEnvelope(envelope!, 'verified', { approved: true });
+    const result = applySellerAgentEnvelope(envelope!, 'verified', {
+      approved: true,
+      catalogItems: getDemoCatalogItems(),
+    });
     expect(result.trustBlockReason).toBeNull();
 
-    const updated = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const updated = result.catalog.find((item) => item.id === 'mustard-oil-1l');
     expect(updated?.descriptor?.name).toBe('Cold Pressed Mustard Oil 1L');
     expect(updated?.descriptor?.short_desc).toBe(
       'Cold-pressed mustard oil with a sharp aroma and small-batch sourcing.',
@@ -354,7 +361,8 @@ describe('agentSellerState', () => {
   });
 
   it.each(TRUST_STATES)('applies catalog write trust policy for %s', (trustState) => {
-    const before = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const catalogItems = getDemoCatalogItems();
+    const before = catalogItems.find((item) => item.id === 'mustard-oil-1l');
     expect(before).toBeTruthy();
 
     const result = applySellerAgentEnvelope(
@@ -373,10 +381,10 @@ describe('agentSellerState', () => {
         ],
       },
       trustState,
-      { approved: trustState === 'verified' },
+      { approved: trustState === 'verified', catalogItems },
     );
 
-    const after = getDemoCatalogItems().find((item) => item.id === 'mustard-oil-1l');
+    const after = result.catalog.find((item) => item.id === 'mustard-oil-1l');
 
     if (trustState === 'verified') {
       expect(result.trustBlockReason).toBeNull();
@@ -470,6 +478,7 @@ describe('agentSellerState', () => {
       pathname: '/agent',
       search: '',
       trustState: 'verified',
+      catalogItems: getDemoCatalogItems(),
     });
 
     expect(snapshot.catalog.total_items).toBeGreaterThan(0);

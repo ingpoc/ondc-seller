@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { coerceSellerNavPath, runSellerTool, sellerToolsForMandate } from './agentTools';
+import {
+  coerceSellerNavPath,
+  findSellerCatalogMatch,
+  runSellerTool,
+  sellerToolsForMandate,
+} from './agentTools';
 
 vi.mock('./commerceClient', () => ({
-  createAndPublishSellerItem: vi.fn(async (input: { name: string; id: string }) => ({
-    ...input,
-    price: '100',
-  })),
   listCommerceSellerOrders: vi.fn(),
+  listCommerceSellerItems: vi.fn(async () => []),
 }));
 
 vi.mock('./agentGuardClient', () => ({
@@ -27,6 +29,8 @@ describe('seller agent tools', () => {
     expect(coerceSellerNavPath('catalog')).toBe('/catalog');
     expect(coerceSellerNavPath('/catalog')).toBe('/catalog');
     expect(coerceSellerNavPath('orders')).toBe('/orders');
+    expect(coerceSellerNavPath('agent')).toBeNull();
+    expect(coerceSellerNavPath('/agent')).toBeNull();
   });
 
   it('navigate_to coerces bare catalog to /catalog', async () => {
@@ -60,6 +64,137 @@ describe('seller agent tools', () => {
       'preference',
       'brief refund confirmations',
     );
+  });
+
+  it('catalog_publish executes the mutation through AgentGuard', async () => {
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'allow',
+      receipt: { receipt_id: 'rcpt_catalog' } as never,
+      execution: { item: { item_id: 'item-1', title: 'Ragi Flour' } },
+    });
+
+    const result = await runSellerTool(
+      'catalog_publish',
+      { title: 'Ragi Flour', price_inr: 120, inventory: 5 },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.receiptId).toBe('rcpt_catalog');
+    expect(result.data?.updated_existing).toBe(false);
+    expect(executeProtectedAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'seller.catalog.publish',
+        amountInr: 0,
+        payload: expect.objectContaining({ title: 'Ragi Flour', inventory: 5 }),
+      }),
+    );
+  });
+
+  it('catalog_publish updates an existing same-title SKU instead of duplicating', async () => {
+    const { listCommerceSellerItems } = await import('./commerceClient');
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(listCommerceSellerItems).mockResolvedValueOnce([
+      {
+        item_id: 'item_rice_1',
+        version: 1,
+        status: 'published',
+        seller_id: 'principal:demo:s',
+        title: 'Rice 10 kg',
+        description: 'old',
+        price_inr: 200,
+        inventory: 10,
+        created_at: '2026-07-20T00:00:00Z',
+        updated_at: '2026-07-20T00:00:00Z',
+      },
+    ]);
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'allow',
+      receipt: { receipt_id: 'rcpt_update' } as never,
+      execution: { item: { item_id: 'item_rice_1', title: 'Rice 10 kg', price_inr: 100 } },
+    });
+
+    const result = await runSellerTool(
+      'catalog_publish',
+      { title: 'Rice 10 kg', price_inr: 100, inventory: 10 },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/Updated/i);
+    expect(result.data?.updated_existing).toBe(true);
+    expect(executeProtectedAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'seller.catalog.publish',
+        resourceId: 'item_rice_1',
+        payload: expect.objectContaining({
+          item_id: 'item_rice_1',
+          title: 'Rice 10 kg',
+          price_inr: 100,
+        }),
+      }),
+    );
+  });
+
+  it('findSellerCatalogMatch prefers exact live title', () => {
+    const match = findSellerCatalogMatch(
+      [
+        {
+          item_id: 'a',
+          version: 1,
+          status: 'published',
+          seller_id: 's',
+          title: 'Rice 10 kg',
+          description: '',
+          price_inr: 200,
+          created_at: '2026-07-20T00:00:00Z',
+          updated_at: '2026-07-20T00:00:00Z',
+        },
+        {
+          item_id: 'b',
+          version: 1,
+          status: 'archived',
+          seller_id: 's',
+          title: 'Rice 10 kg',
+          description: '',
+          price_inr: 90,
+          created_at: '2026-07-20T00:00:00Z',
+          updated_at: '2026-07-20T01:00:00Z',
+        },
+      ],
+      'rice 10 kg',
+    );
+    expect(match?.item_id).toBe('a');
+  });
+
+  it('list_pending_orders summarizes accept and fulfill queues', async () => {
+    const { listCommerceSellerOrders } = await import('./commerceClient');
+    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
+      {
+        id: 'ord-paid',
+        status: 'created',
+        createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T01:00:00Z',
+        total: 100,
+        items: [{ id: 'i1', name: 'Rice 10 kg', quantity: 1, price: { currency: 'INR', value: '100.00' } }],
+      },
+      {
+        id: 'ord-accepted',
+        status: 'accepted',
+        createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T02:00:00Z',
+        total: 200,
+        items: [{ id: 'i2', name: 'Atta', quantity: 2, price: { currency: 'INR', value: '100.00' } }],
+      },
+    ] as never);
+
+    const result = await runSellerTool('list_pending_orders', {}, { subjectId: 'principal:demo:s' });
+    expect(result.ok).toBe(true);
+    expect(result.navigateTo).toBe('/orders');
+    expect(result.data?.awaiting_accept).toBe(1);
+    expect(result.data?.awaiting_fulfill).toBe(1);
+    expect(result.message).toMatch(/2 pending/i);
   });
 
   it('offers order tools only for their canonical AgentGuard actions', () => {

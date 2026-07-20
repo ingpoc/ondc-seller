@@ -1,3 +1,6 @@
+// Legacy Seller API proxy compatibility owner for Config and catalog-delete
+// routes. Current commerce mutations execute through gateway AgentGuard.
+// Delete with ondcseller/api + netlify proxy adapters after 2026-08-01.
 const PROTECTED_ACTIONS = {
   catalog_save: 'verified',
   catalog_delete: 'verified',

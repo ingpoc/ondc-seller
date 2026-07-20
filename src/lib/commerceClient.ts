@@ -12,6 +12,10 @@ export interface DemoCommerceItem {
   description: string;
   price_inr: number;
   inventory?: number;
+  category_id?: string;
+  image_url?: string;
+  image_caption?: string;
+  delivery_areas?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -23,17 +27,37 @@ export interface DemoCommerceOrder {
   buyer_id: string;
   seller_id: string;
   item_id: string;
+  item_title?: string;
   item_version: number;
   quantity: number;
   amount_inr: number;
   status: string;
+  refunded_amount_inr?: number;
+  refund_status?: string;
   payment?: {
     status?: string;
     amount_inr?: number;
     reference_id?: string;
   };
+  delivery_address?: UCPOrder['deliveryAddress'];
   created_at: string;
   updated_at: string;
+}
+
+export type SellerCommerceOrder = UCPOrder & {
+  refundedAmountInr?: number;
+  refundStatus?: string;
+  paymentStatus?: string;
+};
+
+export function paymentStatusLabel(status?: string): string {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'paid' || normalized === 'succeeded') return 'Paid';
+  if (normalized === 'partially_refunded') return 'Partially refunded';
+  if (normalized === 'refunded') return 'Refunded';
+  if (normalized === 'failed') return 'Payment failed';
+  if (normalized === 'pending') return 'Payment pending';
+  return 'Payment status unavailable';
 }
 
 interface ApiEnvelope<T> {
@@ -60,10 +84,6 @@ async function demoFetch<T>(endpoint: string, init: RequestInit = {}): Promise<T
   return body.data as T;
 }
 
-function makeIdempotencyKey(scope: string, id: string) {
-  return `${scope}:${id}:${Date.now()}`;
-}
-
 export function mapDemoItemToCatalogItem(
   item: DemoCommerceItem,
   inventory = item.inventory ?? 0,
@@ -80,16 +100,18 @@ export function mapDemoItemToCatalogItem(
       currency: 'INR',
       value: item.price_inr.toFixed(2),
     },
-    images: [],
+    images: item.image_url ? [{ url: item.image_url }] : [],
+    imageCaption: item.image_caption,
+    deliveryAreas: item.delivery_areas,
     category: {
-      name: 'Grocery',
+      name: item.category_id || 'Grocery',
     },
-    category_id: 'Grocery',
+    category_id: item.category_id || 'Grocery',
     quantity: inventory,
   } as BecknItem;
 }
 
-export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): UCPOrder {
+export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerCommerceOrder {
   const statusByCommerceStatus: Record<string, UCPOrderStatus> = {
     paid: 'created',
     accepted: 'accepted',
@@ -101,6 +123,8 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): UCPOrder {
   };
   const status = statusByCommerceStatus[order.status] ?? 'created';
   const total = order.amount_inr;
+  const unitPrice = total / Math.max(order.quantity, 1);
+  const delivery = order.delivery_address;
   return {
     id: order.order_id,
     status,
@@ -109,9 +133,9 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): UCPOrder {
     items: [
       {
         id: order.item_id,
-        name: order.item_id,
+        name: order.item_title || order.item_id,
         quantity: order.quantity,
-        price: { currency: 'INR', value: total.toFixed(2) },
+        price: { currency: 'INR', value: unitPrice.toFixed(2) },
       },
     ],
     total,
@@ -122,35 +146,27 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): UCPOrder {
       breakup: [],
     },
     buyer: {
-      name: order.buyer_id,
-      email: '',
-      phone: '',
+      name: delivery?.name || `Customer ${order.buyer_id.replace(/[^a-z0-9]/gi, '').slice(-8).toUpperCase()}`,
+      email: delivery?.email || '',
+      phone: delivery?.phone || '',
       contact: {},
     },
-    deliveryAddress: {
-      name: order.buyer_id,
-      phone: '',
-      line1: 'Simulated ONDC delivery',
-      city: 'Demo city',
-      state: 'Demo state',
-      postalCode: '000000',
-      country: 'IND',
-    },
+    deliveryAddress: delivery,
     fulfillment: {
       type: 'delivery',
       status: status === 'delivered' ? 'delivered' : status === 'cancelled' ? 'cancelled' : 'pending',
-      providerName: 'Simulated ONDC logistics',
       tracking: {
         status,
-        statusMessage: `Commerce order ${order.transaction_id}`,
+        statusMessage: 'Order received through the commerce exchange.',
       },
     },
-    payment: {
-      type: 'upi',
-      status: order.payment?.status === 'succeeded' || order.status === 'paid' ? 'PAID' : 'NOT-PAID',
-      amount: { currency: 'INR', value: total.toFixed(2) },
-      transactionId: order.transaction_id,
-    },
+    refundedAmountInr: order.refunded_amount_inr ?? 0,
+    refundStatus: order.refund_status,
+    paymentStatus:
+      order.refund_status ||
+      (order.payment?.status === 'succeeded' || order.status === 'paid'
+        ? 'paid'
+        : order.payment?.status),
   };
 }
 
@@ -174,63 +190,40 @@ export async function getPublishedCatalogProduct(itemId: string) {
   return mapDemoItemToCatalogItem(data.item, data.inventory);
 }
 
-export async function createAndPublishSellerItem(input: {
-  id: string;
-  name: string;
-  description: string;
-  price: string;
-  inventory?: number;
-  sellerId?: string | null;
-}) {
-  const priceInr = Math.round(Number(input.price || 0));
-  const inventory = Math.max(0, Math.round(Number(input.inventory ?? 10)));
-  const idempotencyKey = makeIdempotencyKey('seller-item', input.id);
-  const created = await demoFetch<{ item: DemoCommerceItem; inventory: number }>('/api/demo-commerce/seller/items', {
-    method: 'POST',
-    headers: { 'Idempotency-Key': `${idempotencyKey}:create` },
-    body: JSON.stringify({
-      idempotency_key: `${idempotencyKey}:create`,
-      title: input.name,
-      description: input.description,
-      price_inr: priceInr,
-      inventory,
-      seller_id: input.sellerId || 'demo-seller',
-    }),
-  });
-  const published = await demoFetch<{ item: DemoCommerceItem; inventory: number }>(
-    `/api/demo-commerce/seller/items/${created.item.item_id}/publish`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': `${idempotencyKey}:publish` },
-      body: JSON.stringify({ idempotency_key: `${idempotencyKey}:publish` }),
-    },
+export async function listCommerceSellerItems() {
+  const data = await demoFetch<{ items: DemoCommerceItem[]; count: number }>(
+    '/api/demo-commerce/seller/items',
   );
-  const item = mapDemoItemToCatalogItem(published.item, published.inventory);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('seller-catalog-changed', { detail: { itemId: item.id } }));
-  }
-  return item;
+  return data.items ?? [];
 }
 
-export async function listCommerceSellerOrders(sellerId?: string) {
-  const params = new URLSearchParams();
-  if (sellerId) params.set('seller_id', sellerId);
-  const suffix = params.toString() ? `?${params.toString()}` : '';
-  const data = await demoFetch<{ orders: DemoCommerceOrder[]; count: number }>(`/api/demo-commerce/seller/orders${suffix}`);
+export async function listSellerCatalogResponse() {
+  const items = await listCommerceSellerItems();
+  // Archive is soft-delete: gateway still returns the row; active catalog must hide it.
+  const live = items.filter((item) => String(item.status || '').toLowerCase() !== 'archived');
+  return {
+    'bpp/providers': [
+      {
+        items: live.map((item) => mapDemoItemToCatalogItem(item)),
+      },
+    ],
+    __source: 'api',
+  } as const;
+}
+
+export async function getSellerCatalogProduct(itemId: string) {
+  const data = await demoFetch<{ item: DemoCommerceItem; inventory: number }>(
+    `/api/demo-commerce/seller/items/${encodeURIComponent(itemId)}`,
+  );
+  return mapDemoItemToCatalogItem(data.item, data.inventory);
+}
+
+export async function listCommerceSellerOrders() {
+  const data = await demoFetch<{ orders: DemoCommerceOrder[]; count: number }>('/api/demo-commerce/seller/orders');
   return data.orders.map(mapDemoOrderToSellerOrder);
 }
 
 export async function getCommerceOrder(orderId: string) {
-  const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/buyer/orders/${orderId}`);
-  return mapDemoOrderToSellerOrder(data.order);
-}
-
-export async function transitionCommerceSellerOrder(orderId: string, status: 'accepted' | 'rejected') {
-  const idempotencyKey = makeIdempotencyKey(`seller-order-${status}`, orderId);
-  const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/seller/orders/${orderId}/transition`, {
-    method: 'POST',
-    headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ idempotency_key: idempotencyKey, status }),
-  });
+  const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/seller/orders/${orderId}`);
   return mapDemoOrderToSellerOrder(data.order);
 }

@@ -1,18 +1,17 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Navigate, Route, Routes, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bot, Menu, Search, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
+import { FormEvent, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Navigate, NavLink, Route, Routes, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Bot, ChevronDown, Menu, Search, ShieldAlert, ShieldCheck, ShieldX, UserRound } from 'lucide-react';
 import { useAgentRuntime, useSubject, useTrustState } from './hooks';
 import { DashboardPage } from './pages/DashboardPage';
 import { CatalogPage } from './pages/CatalogPage';
 import { ProductEditPage } from './pages/ProductEditPage';
-import { AgentChatPage } from './pages/AgentChatPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { AgentGuardPage } from './pages/AgentGuardPage';
 import { ConfigPage } from './pages/ConfigPage';
+import { SellerLandingPage } from './pages/SellerLandingPage';
 import { SamanthaOrb } from './components/SamanthaOrb';
 import { Button } from './components/ui/button';
-import { ButtonGroup, ButtonGroupText } from './components/ui/button-group';
 import {
   InputGroup,
   InputGroupAddon,
@@ -27,7 +26,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
-import type { PortfolioTrustState } from './lib/trust';
+import { effectiveElevatedTrustState, type PortfolioTrustState } from './lib/trust';
 import { cn } from './lib/utils';
 import { useAuthContext } from './contexts/AuthContext';
 import { useAuthProviders } from './lib/authProviders';
@@ -40,43 +39,27 @@ type NavItem = {
   external?: boolean;
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { href: '/agentguard', label: 'Business controls' },
+/** Persistent shop destinations only — permissions live under Account. */
+const PRIMARY_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/catalog', label: 'Catalog' },
   { href: '/orders', label: 'Orders' },
   { href: '/config', label: 'Settings' },
 ];
 
-const SECONDARY_NAV_ITEMS: NavItem[] = [
-  { href: '/agent', label: 'Ask Samantha' },
-  { href: '/usecase.html#agents', label: 'How it works', external: true },
-];
+const ACCOUNT_ASSISTANT_ITEM: NavItem = {
+  href: '/agentguard',
+  label: 'Assistant permissions',
+};
 
+type HeaderControl = 'search' | 'account' | null;
 
+export function headerTrustIsHealthy(label: string): boolean {
+  return label === 'Verified';
+}
 
-type HeaderControl = 'search' | 'runtime' | 'trust' | null;
-
-function getActivePath(pathname: string): string {
-  if (pathname === '/' || pathname.startsWith('/dashboard')) {
-    return '/dashboard';
-  }
-  if (pathname.startsWith('/catalog')) {
-    return '/catalog';
-  }
-  if (pathname.startsWith('/orders')) {
-    return '/orders';
-  }
-  if (pathname.startsWith('/config')) {
-    return '/config';
-  }
-  if (pathname.startsWith('/agentguard')) {
-    return '/agentguard';
-  }
-  if (pathname.startsWith('/agent')) {
-    return '/agent';
-  }
-  return '/dashboard';
+export function headerRuntimeIsHealthy(label: string): boolean {
+  return label === 'Ready';
 }
 
 function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
@@ -93,14 +76,16 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
     case 'verified':
       return {
         label: 'Verified',
-        detail: 'Verified trust keeps catalog, config, and high-trust operations available.',
+        detail:
+          'Your signed-in seller identity is verified. Connection and AgentGuard status are shown separately.',
         className: 'bg-primary/12 text-primary',
         icon: ShieldCheck,
       };
     case 'identity_present_unverified':
       return {
         label: 'Unverified',
-        detail: 'Identity exists, but seller trust must be verified before publishing elevated actions.',
+        detail:
+          'Identity exists, but seller trust must be verified before publishing elevated actions.',
         className: 'bg-accent text-accent-foreground',
         icon: ShieldAlert,
       };
@@ -128,11 +113,17 @@ function getTrustMeta(state: PortfolioTrustState, loading?: boolean) {
   }
 }
 
-function getRuntimeMeta({
+export function getHeaderTrustMeta(
+  state: PortfolioTrustState,
+  loading: boolean,
+  principalId?: string | null
+) {
+  return getTrustMeta(effectiveElevatedTrustState(state, principalId), loading);
+}
+
+export function getRuntimeMeta({
   loading,
   runtime_available,
-  auth_mode,
-  blocked_reason,
 }: {
   loading?: boolean;
   runtime_available: boolean;
@@ -142,7 +133,7 @@ function getRuntimeMeta({
   if (loading) {
     return {
       label: 'Loading',
-      detail: 'Checking whether the local seller runtime is available.',
+      detail: 'Checking whether the seller assistant is available.',
       className: 'bg-secondary text-secondary-foreground',
       icon: Bot,
     };
@@ -150,8 +141,8 @@ function getRuntimeMeta({
 
   if (runtime_available) {
     return {
-      label: auth_mode,
-      detail: 'The seller agent runtime is available for this subject and wallet context.',
+      label: 'Ready',
+      detail: 'The seller assistant is ready for delegated seller tasks.',
       className: 'bg-primary/12 text-primary',
       icon: Bot,
     };
@@ -159,38 +150,56 @@ function getRuntimeMeta({
 
   return {
     label: 'Unavailable',
-    detail: blocked_reason || 'Local seller runtime is unavailable for this session.',
+    detail: 'The seller assistant is not ready. Open Settings to review the connection.',
     className: 'bg-accent text-accent-foreground',
     icon: Bot,
   };
 }
 
-function NavigationLink({
+export function NavigationLink({
   href,
   label,
-  active,
   onNavigate,
   external,
 }: {
   href: string;
   label: string;
-  active: boolean;
   onNavigate?: () => void;
   external?: boolean;
 }) {
   if (external) {
     return (
-      <a href={href} onClick={onNavigate} className="nav-pill" data-active="false">
+      <a href={href} onClick={onNavigate} className="nav-pill">
         {label}
       </a>
     );
   }
 
   return (
-    <Link to={href} onClick={onNavigate} className="nav-pill" data-active={active ? 'true' : 'false'}>
+    <NavLink to={href} onClick={onNavigate} className="nav-pill">
       {label}
-    </Link>
+    </NavLink>
   );
+}
+
+export function RequireSellerSession({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const { isAuthenticated, loading } = useAuthContext();
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6" role="status">
+        Checking sign-in…
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to="/" replace state={{ returnTo }} />;
+  }
+
+  return children;
 }
 
 function HeaderSearch({
@@ -228,11 +237,12 @@ function HeaderSearch({
         type="button"
         variant="outline"
         size="icon-sm"
-        className={cn('rounded-full shadow-sm', className)}
+        className={cn('rounded-full shadow-sm min-[1800px]:w-auto min-[1800px]:px-3', className)}
         onClick={onExpand}
         aria-label="Open catalog search"
       >
         <Search className="size-4" />
+        <span className="hidden min-[1800px]:inline">Search</span>
       </Button>
     );
   }
@@ -266,77 +276,201 @@ function HeaderSearch({
   );
 }
 
-function HeaderControlTile({
-  icon: Icon,
-  label,
-  detail,
-  href,
-  expanded,
-  onExpand,
-  className,
-  ariaLabel,
+function useSellerHeaderAuthority() {
+  const { walletAddress, subjectId, principalId } = useSubject();
+  const trust = useTrustState(walletAddress);
+  const runtime = useAgentRuntime(subjectId, walletAddress);
+  const trustMeta = getHeaderTrustMeta(trust.state, trust.loading, principalId);
+  const runtimeMeta = getRuntimeMeta(runtime);
+  return { trustMeta, runtimeMeta };
+}
+
+/** Healthy Ready/Verified stay out of the bar; only consequential problems surface. */
+function HeaderAttentionBadge() {
+  const { trustMeta, runtimeMeta } = useSellerHeaderAuthority();
+  const trustOk = headerTrustIsHealthy(trustMeta.label);
+  const runtimeOk = headerRuntimeIsHealthy(runtimeMeta.label);
+  if (trustMeta.label === 'Loading' || runtimeMeta.label === 'Loading') return null;
+  if (trustOk && runtimeOk) return null;
+
+  const preferTrust = !trustOk;
+  const href = preferTrust ? '/config' : '/agentguard';
+  const label = preferTrust ? `Identity: ${trustMeta.label}` : `Assistant: ${runtimeMeta.label}`;
+  const Icon = preferTrust ? trustMeta.icon : runtimeMeta.icon;
+  const detail = preferTrust ? trustMeta.detail : runtimeMeta.detail;
+
+  return (
+    <Link
+      to={href}
+      title={detail}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium',
+        preferTrust ? trustMeta.className : runtimeMeta.className
+      )}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span>{label}</span>
+    </Link>
+  );
+}
+
+function AccountMenu({
+  open,
+  onOpenChange,
+  onLogout,
+  onNavigate,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  detail: string;
-  href?: string;
-  expanded: boolean;
-  onExpand: () => void;
-  className: string;
-  ariaLabel: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onLogout: () => void;
+  onNavigate?: () => void;
 }) {
-  if (!expanded) {
-    return (
+  const { trustMeta, runtimeMeta } = useSellerHeaderAuthority();
+  const TrustIcon = trustMeta.icon;
+  const panelId = 'seller-account-menu';
+
+  return (
+    <div className="relative">
       <Button
         type="button"
         variant="outline"
-        size="icon-sm"
+        size="sm"
         className="rounded-full shadow-sm"
-        onClick={onExpand}
-        aria-label={ariaLabel}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => onOpenChange(!open)}
       >
-        <Icon className="size-4" />
+        <UserRound className="size-4" aria-hidden />
+        <span>Account</span>
+        <ChevronDown className={cn('size-3.5 opacity-70 transition', open && 'rotate-180')} aria-hidden />
       </Button>
-    );
-  }
-
-  const tile = (
-    <ButtonGroup className="shadow-sm">
-      <ButtonGroupText className={cn('gap-2 rounded-full px-3', className)}>
-        <Icon className="size-4" />
-        <span className="text-sm font-medium">{label}</span>
-      </ButtonGroupText>
-    </ButtonGroup>
+      {open ? (
+        <div
+          id={panelId}
+          role="menu"
+          aria-label="Account"
+          className="absolute right-0 z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-border/70 bg-background p-3 shadow-lg"
+        >
+          <div className="space-y-2 border-b border-border/60 pb-3 text-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Identity
+            </p>
+            <div className="flex items-start gap-2 text-foreground">
+              <TrustIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div>
+                <p className="font-medium">{trustMeta.label}</p>
+                <p className="text-xs text-muted-foreground">{trustMeta.detail}</p>
+              </div>
+            </div>
+            <p className="pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Assistant
+            </p>
+            <div className="flex items-start gap-2 text-foreground">
+              <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div>
+                <p className="font-medium">{runtimeMeta.label}</p>
+                <p className="text-xs text-muted-foreground">{runtimeMeta.detail}</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 pt-2">
+            <Link
+              role="menuitem"
+              to={ACCOUNT_ASSISTANT_ITEM.href}
+              className="rounded-xl px-3 py-2 text-sm hover:bg-secondary"
+              onClick={() => {
+                onOpenChange(false);
+                onNavigate?.();
+              }}
+            >
+              {ACCOUNT_ASSISTANT_ITEM.label}
+            </Link>
+            <Link
+              role="menuitem"
+              to="/config"
+              className="rounded-xl px-3 py-2 text-sm hover:bg-secondary"
+              onClick={() => {
+                onOpenChange(false);
+                onNavigate?.();
+              }}
+            >
+              Settings
+            </Link>
+            <Button
+              type="button"
+              role="menuitem"
+              variant="ghost"
+              className="justify-start rounded-xl px-3"
+              onClick={() => {
+                onOpenChange(false);
+                onLogout();
+              }}
+            >
+              Sign out
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
+}
 
-  return href ? (
-    <a href={href} className="block" title={detail}>
-      {tile}
-    </a>
-  ) : (
-    <div title={detail}>{tile}</div>
+function AccountPanelCompact({
+  onLogout,
+  onNavigate,
+}: {
+  onLogout: () => void;
+  onNavigate: () => void;
+}) {
+  const { trustMeta, runtimeMeta } = useSellerHeaderAuthority();
+  const TrustIcon = trustMeta.icon;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Account</p>
+      <div className="space-y-2 text-sm">
+        <div className="flex items-start gap-2">
+          <TrustIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div>
+            <p className="font-medium">Identity · {trustMeta.label}</p>
+            <p className="text-xs text-muted-foreground">{trustMeta.detail}</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-2">
+          <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div>
+            <p className="font-medium">Assistant · {runtimeMeta.label}</p>
+            <p className="text-xs text-muted-foreground">{runtimeMeta.detail}</p>
+          </div>
+        </div>
+      </div>
+      <NavigationLink
+        href={ACCOUNT_ASSISTANT_ITEM.href}
+        label={ACCOUNT_ASSISTANT_ITEM.label}
+        onNavigate={onNavigate}
+      />
+      <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={onLogout}>
+        Sign out
+      </Button>
+    </div>
   );
 }
 
 function HeaderBar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { walletAddress, subjectId } = useSubject();
-  const { isAuthenticated, loading: authLoading, loginAuth0, loginGoogle, logout } =
-    useAuthContext();
+  const {
+    isAuthenticated,
+    loading: authLoading,
+    loginAuth0,
+    loginGoogle,
+    logout,
+  } = useAuthContext();
   const authProviders = useAuthProviders();
-  const trust = useTrustState(walletAddress);
-  const runtime = useAgentRuntime(subjectId, walletAddress);
   const [activeControl, setActiveControl] = useState<HeaderControl>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const controlsRef = useRef<HTMLDivElement | null>(null);
-  const activePath = getActivePath(location.pathname);
-  const visibleSecondaryNavItems = isAuthenticated
-    ? SECONDARY_NAV_ITEMS
-    : SECONDARY_NAV_ITEMS.filter((item) => item.href !== '/agent');
-  const trustMeta = getTrustMeta(trust.state, trust.loading);
-  const runtimeMeta = getRuntimeMeta(runtime);
-  const TrustIcon = trustMeta.icon;
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -358,206 +492,165 @@ function HeaderBar() {
     <header className="shell-header">
       <div className="shell-inner">
         <div className="min-w-0 shrink-0">
-          <Link to="/dashboard" className="block text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+          <Link
+            to={isAuthenticated ? '/dashboard' : '/'}
+            className="block text-lg font-semibold tracking-tight text-foreground sm:text-xl"
+          >
             ONDC Seller
           </Link>
           <div className="hidden text-xs text-muted-foreground sm:block">
-            Manage products and orders across the ONDC network
+            {isAuthenticated ? 'Catalog and orders' : 'Sign in to manage your store'}
           </div>
         </div>
 
-        <nav className="hidden flex-1 items-center justify-center gap-1.5 lg:flex">
-          {NAV_ITEMS.map((item) => (
-            <NavigationLink
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              active={activePath === item.href}
-              external={item.external}
-            />
-          ))}
-        </nav>
+        {isAuthenticated ? (
+          <div className="hidden flex-1 justify-center lg:flex">
+            <nav aria-label="Primary seller navigation" className="nav-track">
+              {PRIMARY_NAV_ITEMS.map((item) => (
+                <NavigationLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  external={item.external}
+                />
+              ))}
+            </nav>
+          </div>
+        ) : null}
 
         <div ref={controlsRef} className="ml-auto hidden items-center gap-2 lg:flex">
-          <HeaderSearch
-            onSearch={handleSearch}
-            expanded={activeControl === 'search'}
-            onExpand={() => setActiveControl('search')}
-            onCollapse={() => setActiveControl(null)}
-            className={cn(activeControl === 'search' ? 'w-[20rem]' : 'w-auto')}
-          />
-
           {isAuthenticated ? (
             <>
-              <HeaderControlTile
-                icon={Bot}
-                label={`Assistant ${runtimeMeta.label}`}
-                detail={runtimeMeta.detail}
-                expanded={activeControl === 'runtime'}
-                onExpand={() => setActiveControl('runtime')}
-                className={runtimeMeta.className}
-                ariaLabel="Open assistant status"
+              <HeaderSearch
+                onSearch={handleSearch}
+                expanded={activeControl === 'search'}
+                onExpand={() => setActiveControl('search')}
+                onCollapse={() => setActiveControl(null)}
+                className={cn(activeControl === 'search' ? 'w-[20rem]' : 'w-auto')}
               />
-
-              <HeaderControlTile
-                icon={trustMeta.icon}
-                label={`Access ${trustMeta.label}`}
-                detail={trustMeta.detail}
-                expanded={activeControl === 'trust'}
-                onExpand={() => setActiveControl('trust')}
-                className={trustMeta.className}
-                ariaLabel="Open account access status"
+              <HeaderAttentionBadge />
+              <AccountMenu
+                open={activeControl === 'account'}
+                onOpenChange={(next) => setActiveControl(next ? 'account' : null)}
+                onLogout={() => void logout()}
               />
             </>
           ) : null}
 
-          {IDENTITY_AUTH_ENABLED && !authLoading ? (
-            isAuthenticated ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-full"
-                onClick={() => void logout()}
-              >
-                Sign out
-              </Button>
-            ) : (
-              <div className="flex items-center gap-2">
-                {authProviders.auth0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => loginAuth0(location.pathname)}
-                  >
-                    Sign in
-                  </Button>
-                ) : null}
-                {!authProviders.auth0 && authProviders.google ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => loginGoogle(location.pathname)}
-                  >
-                    Google
-                  </Button>
-                ) : null}
-                {!authProviders.loading &&
-                !authProviders.auth0 &&
-                !authProviders.google ? (
-                  <span className="text-xs text-muted-foreground">Sign-in not configured</span>
-                ) : null}
-              </div>
-            )
+          {IDENTITY_AUTH_ENABLED && !authLoading && !isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              {authProviders.auth0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => loginAuth0(location.pathname)}
+                >
+                  Sign in
+                </Button>
+              ) : null}
+              {!authProviders.auth0 && authProviders.google ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => loginGoogle(location.pathname)}
+                >
+                  Google
+                </Button>
+              ) : null}
+              {!authProviders.loading && !authProviders.auth0 && !authProviders.google ? (
+                <span className="text-xs text-muted-foreground">Sign-in not configured</span>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
         <div className="ml-auto flex items-center gap-2 lg:hidden">
-          {IDENTITY_AUTH_ENABLED && !authLoading ? (
-            isAuthenticated ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-full"
-                onClick={() => void logout()}
-              >
-                Sign out
-              </Button>
-            ) : (
-              <div className="flex items-center gap-1">
-                {authProviders.auth0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => loginAuth0(location.pathname)}
-                  >
-                    Sign in
-                  </Button>
-                ) : null}
-                {!authProviders.auth0 && authProviders.google ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-full"
-                    onClick={() => loginGoogle(location.pathname)}
-                  >
-                    Google
-                  </Button>
-                ) : null}
-                {!authProviders.loading &&
-                !authProviders.auth0 &&
-                !authProviders.google ? (
-                  <span className="text-xs text-muted-foreground">Sign-in not configured</span>
-                ) : null}
-              </div>
-            )
+          {IDENTITY_AUTH_ENABLED && !authLoading && !isAuthenticated ? (
+            <div className="flex items-center gap-1">
+              {authProviders.auth0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => loginAuth0(location.pathname)}
+                >
+                  Sign in
+                </Button>
+              ) : null}
+              {!authProviders.auth0 && authProviders.google ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => loginGoogle(location.pathname)}
+                >
+                  Google
+                </Button>
+              ) : null}
+              {!authProviders.loading && !authProviders.auth0 && !authProviders.google ? (
+                <span className="text-xs text-muted-foreground">Sign-in not configured</span>
+              ) : null}
+            </div>
           ) : null}
-          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-            <SheetTrigger asChild>
-              <Button type="button" variant="outline" size="icon-sm" aria-label="Open seller navigation">
-                <Menu className="size-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="w-[20rem]">
-              <SheetHeader>
-                <SheetTitle>Seller navigation</SheetTitle>
-                <SheetDescription>
-                  Move between products, orders, settings, and seller tools.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="flex flex-col gap-3 px-6 pb-6">
-                <div className="flex flex-col gap-2">
-                  {NAV_ITEMS.map((item) => (
-                    <NavigationLink
-                      key={item.href}
-                      href={item.href}
-                      label={item.label}
-                      active={activePath === item.href}
-                      onNavigate={() => setMobileOpen(false)}
-                      external={item.external}
-                    />
-                  ))}
-                </div>
-
-                <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-                  {visibleSecondaryNavItems.map((item) => (
-                    <NavigationLink
-                      key={item.href}
-                      href={item.href}
-                      label={item.label}
-                      active={activePath === item.href}
-                      onNavigate={() => setMobileOpen(false)}
-                      external={item.external}
-                    />
-                  ))}
-                </div>
-
-                <HeaderSearch onSearch={(query) => {
-                  handleSearch(query);
-                  setMobileOpen(false);
-                }} expanded onCollapse={() => setMobileOpen(false)} />
-
-                {isAuthenticated ? (
-                <div className="flex flex-col gap-2">
-                  <div className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', runtimeMeta.className)}>
-                    <Bot className="size-4" />
-                    <span>Assistant {runtimeMeta.label}</span>
+          {isAuthenticated ? (
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label="Open seller navigation"
+                  aria-expanded={mobileOpen}
+                  aria-controls="seller-navigation"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      setMobileOpen(true);
+                    }
+                  }}
+                >
+                  <Menu className="size-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent id="seller-navigation" side="right" className="w-[20rem]">
+                <SheetHeader>
+                  <SheetTitle>Seller navigation</SheetTitle>
+                  <SheetDescription>
+                    Move between catalog, orders, and settings. Account tools are below.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex flex-col gap-3 px-6 pb-6">
+                  <div className="flex flex-col gap-2">
+                    {PRIMARY_NAV_ITEMS.map((item) => (
+                      <NavigationLink
+                        key={item.href}
+                        href={item.href}
+                        label={item.label}
+                        onNavigate={() => setMobileOpen(false)}
+                        external={item.external}
+                      />
+                    ))}
                   </div>
-                  <a
-                            className={cn('flex items-center gap-2 rounded-3xl px-3 py-2 text-sm', trustMeta.className)}
-                  >
-                    <TrustIcon className="size-4" />
-                    <span>Access {trustMeta.label}</span>
-                  </a>
+
+                  <HeaderSearch
+                    onSearch={(query) => {
+                      handleSearch(query);
+                      setMobileOpen(false);
+                    }}
+                    expanded
+                    onCollapse={() => setMobileOpen(false)}
+                  />
+
+                  <AccountPanelCompact
+                    onLogout={() => void logout()}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
                 </div>
-                ) : null}
-              </div>
-            </SheetContent>
-          </Sheet>
+              </SheetContent>
+            </Sheet>
+          ) : null}
         </div>
       </div>
     </header>
@@ -567,10 +660,6 @@ function HeaderBar() {
 export function App() {
   const location = useLocation();
   const { isAuthenticated } = useAuthContext();
-  const activePath = getActivePath(location.pathname);
-  const visibleSecondaryNavItems = isAuthenticated
-    ? SECONDARY_NAV_ITEMS
-    : SECONDARY_NAV_ITEMS.filter((item) => item.href !== '/agent');
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
@@ -578,36 +667,86 @@ export function App() {
 
   return (
     <div className="min-h-screen">
+      <a
+        href="#seller-main-content"
+        className="sr-only fixed left-4 top-4 z-[100] rounded-full bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only"
+      >
+        Skip to main content
+      </a>
       <HeaderBar />
-      <main className="pb-10">
+      <main id="seller-main-content" tabIndex={-1} className="pb-10">
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/catalog" element={<CatalogPage />} />
-          <Route path="/catalog/new" element={<ProductEditPage />} />
-          <Route path="/catalog/:id" element={<ProductEditPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/orders/:id" element={<OrderDetailPage />} />
-          <Route path="/agentguard" element={<AgentGuardPage />} />
-          <Route path="/config" element={<ConfigPage />} />
+          <Route path="/" element={<SellerLandingPage />} />
           <Route
-            path="/agent"
-            element={isAuthenticated ? <AgentChatPage /> : <Navigate to="/dashboard" replace />}
+            path="/dashboard"
+            element={
+              <RequireSellerSession>
+                <DashboardPage />
+              </RequireSellerSession>
+            }
           />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/catalog"
+            element={
+              <RequireSellerSession>
+                <CatalogPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/catalog/new"
+            element={
+              <RequireSellerSession>
+                <ProductEditPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/catalog/:id"
+            element={
+              <RequireSellerSession>
+                <ProductEditPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/orders"
+            element={
+              <RequireSellerSession>
+                <OrdersPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/orders/:id"
+            element={
+              <RequireSellerSession>
+                <OrderDetailPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/agentguard"
+            element={
+              <RequireSellerSession>
+                <AgentGuardPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/config"
+            element={
+              <RequireSellerSession>
+                <ConfigPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="*"
+            element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} replace />}
+          />
         </Routes>
       </main>
-      <footer className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-3 border-t border-border/60 px-4 py-6 text-sm text-muted-foreground sm:px-6">
-        {visibleSecondaryNavItems.map((item) => (
-          <NavigationLink
-            key={item.href}
-            href={item.href}
-            label={item.label}
-            active={activePath === item.href}
-            external={item.external}
-          />
-        ))}
-      </footer>
       {isAuthenticated ? <SamanthaOrb /> : null}
     </div>
   );

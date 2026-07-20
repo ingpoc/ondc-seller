@@ -6,13 +6,18 @@
  */
 import { executeProtectedAction } from './agentGuardClient';
 import { buildAgentControlPlaneUrl } from './agentControlPlane';
-import { createAndPublishSellerItem, listCommerceSellerOrders } from './commerceClient';
+import {
+  listCommerceSellerItems,
+  listCommerceSellerOrders,
+  type DemoCommerceItem,
+} from './commerceClient';
 import { rememberSamanthaFact } from './samanthaMemory';
 import { startSellerRuntimeBackground } from './samanthaRuntimeHandoff';
 
 export type SellerToolName =
   | 'navigate_to'
   | 'catalog_publish'
+  | 'list_pending_orders'
   | 'accept_order'
   | 'reject_order'
   | 'mark_order_fulfilled'
@@ -30,8 +35,38 @@ export type SellerToolResult = {
   receiptId?: string;
 };
 
+export function normalizeSellerCatalogTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Prefer an existing live SKU with the same title so price edits do not duplicate listings. */
+export function findSellerCatalogMatch(
+  items: DemoCommerceItem[],
+  title: string,
+): DemoCommerceItem | undefined {
+  const needle = normalizeSellerCatalogTitle(title);
+  if (!needle) return undefined;
+  const live = items.filter((item) => String(item.status || '').toLowerCase() !== 'archived');
+  const exact = live
+    .filter((item) => normalizeSellerCatalogTitle(item.title) === needle)
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  if (exact[0]) return exact[0];
+  const fuzzy = live
+    .filter((item) => {
+      const t = normalizeSellerCatalogTitle(item.title);
+      return t.includes(needle) || needle.includes(t);
+    })
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  return fuzzy[0];
+}
+
 export function sellerToolsForMandate(allowedActions: string[] | null | undefined): SellerToolName[] {
-  const tools: SellerToolName[] = ['navigate_to', 'remember_preference', 'delegate_to_runtime_agent'];
+  const tools: SellerToolName[] = [
+    'navigate_to',
+    'list_pending_orders',
+    'remember_preference',
+    'delegate_to_runtime_agent',
+  ];
   if (!allowedActions || allowedActions.includes('seller.catalog.publish')) {
     tools.push('catalog_publish');
   }
@@ -58,7 +93,6 @@ export const SELLER_NAV_ALLOWLIST = [
   '/orders',
   '/agentguard',
   '/config',
-  '/agent',
 ] as const;
 
 /** Coerce model tool args (e.g. path="catalog") into an app route — not user-utterance parsing. */
@@ -84,7 +118,6 @@ export function coerceSellerNavPath(raw: string): string | null {
     settings: '/config',
     dashboard: '/dashboard',
     home: '/dashboard',
-    agent: '/agent',
   };
   return soft[label] ?? null;
 }
@@ -94,7 +127,7 @@ export const SELLER_TOOL_DEFINITIONS = [
     type: 'function' as const,
     name: 'navigate_to',
     description:
-      'Short tool: navigate Seller UI to an allowlisted path (/catalog, /catalog/new, /orders, /agentguard, /config, /dashboard, /agent).',
+      'Short tool: navigate Seller UI to an allowlisted path (/catalog, /catalog/new, /orders, /agentguard, /config, /dashboard).',
     parameters: {
       type: 'object',
       properties: {
@@ -110,7 +143,8 @@ export const SELLER_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     name: 'catalog_publish',
-    description: 'Short tool: create and publish one catalog item into the shared ONDC exchange.',
+    description:
+      'Publish or update one catalog item. If a live SKU with the same title already exists, updates its price/inventory instead of creating a duplicate.',
     parameters: {
       type: 'object',
       properties: {
@@ -120,6 +154,17 @@ export const SELLER_TOOL_DEFINITIONS = [
         description: { type: 'string' },
       },
       required: ['title', 'price_inr'],
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'list_pending_orders',
+    description:
+      'Read tool: summarize pending Seller orders that still need accept/reject/fulfill action. Use when the user asks what is waiting or needs fulfillment.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
     },
   },
   {
@@ -373,6 +418,44 @@ export async function runSellerTool(
     });
   }
 
+  if (name === 'list_pending_orders') {
+    try {
+      const orders = await listCommerceSellerOrders();
+      const pending = orders
+        .filter((order) => order.status === 'created' || order.status === 'accepted')
+        .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+        .slice(0, 8)
+        .map((order) => ({
+          order_id: order.id,
+          status: order.status,
+          amount_inr: order.total,
+          item: order.items?.[0]?.name || order.items?.[0]?.id || 'item',
+          quantity: order.items?.[0]?.quantity ?? 1,
+          updated_at: order.updatedAt,
+        }));
+      const awaitingAccept = pending.filter((row) => row.status === 'created').length;
+      const awaitingFulfill = pending.filter((row) => row.status === 'accepted').length;
+      const summary =
+        pending.length === 0
+          ? 'No pending orders waiting for accept or fulfillment.'
+          : `${pending.length} pending: ${awaitingAccept} to accept, ${awaitingFulfill} to fulfill.`;
+      return {
+        ok: true,
+        tool: name,
+        message: summary,
+        data: { count: pending.length, awaiting_accept: awaitingAccept, awaiting_fulfill: awaitingFulfill, orders: pending },
+        navigateTo: '/orders',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        tool: name,
+        message: err instanceof Error ? err.message : 'Could not load Seller orders.',
+        navigateTo: '/orders',
+      };
+    }
+  }
+
   if (name === 'catalog_publish') {
     const title = String(args.title ?? '');
     const priceInr = Number(args.price_inr) || 0;
@@ -382,19 +465,54 @@ export async function runSellerTool(
       return { ok: false, tool: name, message: 'title and signed-in principal required.' };
     }
     try {
-      const published = await createAndPublishSellerItem({
-        id: `agent-${Date.now()}`,
-        name: title,
-        description: String(args.description ?? 'Freshly published grocery item.'),
-        price: String(priceInr),
-        inventory,
-        sellerId: publisher,
+      let existing: DemoCommerceItem | undefined;
+      try {
+        existing = findSellerCatalogMatch(await listCommerceSellerItems(), title);
+      } catch {
+        existing = undefined;
+      }
+      const resourceId = existing?.item_id || `agent-${Date.now()}`;
+      const updating = Boolean(existing?.item_id);
+      const executed = await executeProtectedAction({
+        walletAddress: wallet || null,
+        action: 'seller.catalog.publish',
+        amountInr: 0,
+        resourceId,
+        idempotencyKey: updating
+          ? `seller-catalog-update:${resourceId}:${priceInr}:${inventory}`
+          : `seller-catalog-publish:${resourceId}`,
+        payload: {
+          ...(updating ? { item_id: resourceId } : {}),
+          title,
+          description: String(
+            args.description ?? existing?.description ?? 'Freshly published grocery item.',
+          ),
+          price_inr: priceInr,
+          inventory,
+          seller_id: publisher,
+        },
       });
+      if (!executed.execution) {
+        throw new Error(
+          executed.decision === 'need_approval'
+            ? 'Catalog publication requires exact approval.'
+            : 'Catalog publication was denied by AgentGuard.',
+        );
+      }
       return {
         ok: true,
         tool: name,
-        message: `Published ${published.name} with ${inventory} in stock — available when buyers search the ONDC network.`,
-        data: { item: published, source: 'demo-commerce-ondc' },
+        message: updating
+          ? `Updated “${title}” to INR ${priceInr} with ${inventory} in stock — same listing, no duplicate.`
+          : `Published ${title} with ${inventory} in stock — available when buyers search ONDC.`,
+        decision: executed.decision,
+        receiptId: executed.receipt?.receipt_id,
+        data: {
+          execution: executed.execution,
+          source: 'agentguard-executor',
+          updated_existing: updating,
+          item_id: resourceId,
+        },
         navigateTo: '/catalog',
       };
     } catch (err) {
@@ -416,7 +534,7 @@ export async function runSellerTool(
     let orderId = String(args.order_id ?? '').trim();
     if (!orderId) {
       try {
-        const orders = await listCommerceSellerOrders(ctx.sellerId);
+        const orders = await listCommerceSellerOrders();
         const latest = orders
           .filter((order) => order.status === eligibleStatus)
           .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
@@ -447,6 +565,7 @@ export async function runSellerTool(
         action,
         amountInr: 0,
         resourceId: orderId,
+        idempotencyKey: `${action}:${orderId}`,
         payload: { order_id: orderId },
       });
       const decision = executed.decision ?? 'allow';

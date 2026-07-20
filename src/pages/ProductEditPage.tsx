@@ -6,29 +6,19 @@ import { useSubject } from '../hooks/useSubject';
 import { ProductForm } from '../components';
 import type { BecknItem } from '../types';
 import type { ProductFormData } from '../components/ProductForm';
-import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
-import { upsertDemoCatalogItem } from '../lib/mockCatalog';
-import { createAndPublishSellerItem } from '../lib/commerceClient';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
-import {
-  assertSellerActionAllowed,
-  buildSellerActionHeaders,
-  buildSellerBackendActionPolicy,
-} from '../lib/sellerActionPolicy';
+import { executeProtectedAction } from '../lib/agentGuardClient';
 import { Alert, Button, Card, PageLayout, PageHeader } from '@/components/seller-ui';
-import { TrustNotice } from '../components/TrustStatus';
-import { elevatedTrustSatisfied } from '../lib/trust';
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
-  const { subjectId, walletAddress, principalId } = useSubject();
+  const { subjectId, walletAddress, displayName } = useSubject();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isNew = !id;
   const shouldUseAgentDraft = searchParams.get('draft') === 'agent';
   const trust = useTrustState(walletAddress);
-  const trustBlocksCatalog = !trust.loading && !elevatedTrustSatisfied(trust.state, principalId);
 
   const { data: existingProduct, execute } = useApi<BecknItem>(
     isNew ? '/api/catalog' : `/api/catalog/products/${id}`
@@ -52,82 +42,35 @@ export function ProductEditPage() {
       setError('');
 
       try {
-        assertSellerActionAllowed('catalog_save', {
-          trustState: trust.state,
+        const executed = await executeProtectedAction({
           walletAddress,
-          subjectId,
+          action: 'seller.catalog.publish',
+          amountInr: 0,
+          resourceId: id ?? data.id,
+          idempotencyKey: `seller-catalog:${id ?? data.id}:${data.name}:${data.price}:${data.inventory}:${data.categoryId}:${data.imageUrl ?? ''}:${data.imageCaption ?? ''}:${data.deliveryAreas ?? ''}`,
+          payload: {
+            ...(isNew ? {} : { item_id: id }),
+            title: data.name,
+            description: data.description,
+            price_inr: Math.round(Number(data.price) || 0),
+            inventory: Math.max(0, Math.round(Number(data.inventory) || 0)),
+            seller_id: subjectId || walletAddress,
+            seller_name: displayName,
+            category_id: data.categoryId,
+            image_url: data.imageUrl?.trim() || null,
+            image_caption: data.imageCaption?.trim() || null,
+            delivery_areas: String(data.deliveryAreas || '')
+              .split(',')
+              .map((area) => area.trim())
+              .filter(Boolean),
+          },
         });
-        const payload = {
-          id: data.id,
-          name: data.name,
-          description: data.description,
-          descriptor: {
-            name: data.name,
-            short_desc: data.description,
-          },
-          price: {
-            currency: data.currency,
-            value: data.price,
-          },
-          images: [],
-          category: {
-            name: data.categoryId || 'General',
-          },
-          category_id: data.categoryId,
-          fulfillment_id: 'ful-1',
-        };
-
-        if (COMMERCE_DEMO_MODE) {
-          try {
-            const published = await createAndPublishSellerItem({
-              id: data.id,
-              name: data.name,
-              description: data.description,
-              price: data.price,
-              sellerId: walletAddress,
-            });
-            upsertDemoCatalogItem(published);
-          } catch {
-            upsertDemoCatalogItem(payload as BecknItem);
-          }
-          recordSellerActionAuditEvent({
-            action: 'catalog_save',
-            targetId: data.id,
-            walletAddress,
-            subjectId,
-            trustState: trust.state,
-            outcome: 'applied',
-            reason: isNew
-              ? 'Created seller catalog item in demo mode.'
-              : 'Updated seller catalog item in demo mode.',
-          });
-          clearConsumedSellerDraft(isNew ? null : (id ?? null));
-          navigate('/catalog');
-          return;
-        }
-
-        const url = isNew
-          ? buildCommerceUrl('/api/catalog/products')
-          : buildCommerceUrl(`/api/catalog/products/${id}`);
-        const method = isNew ? 'POST' : 'PUT';
-
-        const response = await fetch(url, {
-          method,
-          credentials: 'include',
-          headers: buildSellerActionHeaders(
-            buildSellerBackendActionPolicy('catalog_save', {
-              trustState: trust.state,
-              walletAddress,
-              subjectId,
-              auditSubjectId: data.id,
-              auditReferenceId: isNew ? 'catalog-create' : id,
-            })
-          ),
-          body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to save product');
+        if (!executed.execution) {
+          throw new Error(
+            executed.decision === 'need_approval'
+              ? 'Catalog save requires exact approval.'
+              : 'Catalog save was denied by AgentGuard.',
+          );
         }
         recordSellerActionAuditEvent({
           action: 'catalog_save',
@@ -137,12 +80,18 @@ export function ProductEditPage() {
           trustState: trust.state,
           outcome: 'applied',
           reason: isNew
-            ? 'Created seller catalog item through commerce API.'
-            : 'Updated seller catalog item through commerce API.',
+            ? 'Created seller catalog item through AgentGuard.'
+            : 'Updated seller catalog item through AgentGuard.',
         });
 
         clearConsumedSellerDraft(isNew ? null : (id ?? null));
-        navigate('/catalog');
+        navigate('/catalog', {
+          state: {
+            catalogNotice: isNew
+              ? `${data.name} was published.`
+              : `${data.name} was updated.`,
+          },
+        });
       } catch (err) {
         recordSellerActionAuditEvent({
           action: 'catalog_save',
@@ -158,53 +107,12 @@ export function ProductEditPage() {
         setLoading(false);
       }
     },
-    [isNew, id, navigate, subjectId, trust.state, walletAddress]
+    [displayName, isNew, id, navigate, subjectId, trust.state, walletAddress]
   );
 
   const handleCancel = useCallback(() => {
     navigate('/catalog');
   }, [navigate]);
-
-  if (trust.loading) {
-    return (
-      <PageLayout>
-        <PageHeader
-          title={isNew ? 'Add New Product' : 'Edit Product'}
-          subtitle="Checking trust before opening seller write actions."
-        />
-        <TrustNotice
-          state={trust.state}
-          loading={trust.loading}
-          error={trust.error}
-          reason={trust.reason}
-        />
-      </PageLayout>
-    );
-  }
-
-  if (trustBlocksCatalog || trust.error) {
-    return (
-      <PageLayout>
-        <PageHeader
-          title={isNew ? 'Add New Product' : 'Edit Product'}
-          subtitle="Seller catalog writes stay blocked until you sign in or trust is verified."
-        />
-        <div className="space-y-6">
-          <TrustNotice
-            state={trust.state}
-            loading={trust.loading}
-            error={trust.error}
-            reason={trust.reason}
-          />
-          <div className="flex flex-wrap gap-3">
-            <Button type="button" variant="secondary" onClick={handleCancel}>
-              Back to catalog
-            </Button>
-          </div>
-        </div>
-      </PageLayout>
-    );
-  }
 
   return (
     <PageLayout>

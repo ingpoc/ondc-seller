@@ -62,6 +62,7 @@ export interface UCPItem {
   provider?: BecknProvider;
   rating?: BecknRating;
   quantity?: number;
+  imageCaption?: string;
 }
 
 export interface UCPCatalog {
@@ -229,6 +230,9 @@ export interface BecknItem {
     short_desc?: string;
   };
   category_id?: string;
+  quantity?: number;
+  imageCaption?: string;
+  deliveryAreas?: string[];
 }
 
 export interface BecknCatalog {

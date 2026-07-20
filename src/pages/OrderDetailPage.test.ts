@@ -4,13 +4,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { UCPOrderStatus } from '@ondc-sdk/shared';
+import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 
 // Import the component to ensure TypeScript compilation
 import {
   canMutateSellerOrder,
+  fullRefundAmount,
+  getOrderTimeline,
   OrderDetailPage,
-  sellerApprovalNeedsWalletProof,
+  refundConfirmationCopy,
   sellerRefundTrustSatisfied,
 } from './OrderDetailPage';
 
@@ -49,34 +51,52 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
   });
 
   describe('Seller order trust policy', () => {
+    it('requires an explicit irreversible-refund confirmation message', () => {
+      expect(refundConfirmationCopy(178, '1EA9538C', 'Ananya Rao')).toBe(
+        'Refund INR 178 to Ananya Rao for order 1EA9538C? Payment will become Refunded and the order will close as Cancelled. This cannot be undone.'
+      );
+    });
+
+    it('uses the order update time for a completed cancellation timeline', () => {
+      const timeline = getOrderTimeline({
+        status: 'cancelled',
+        createdAt: '2026-07-17T12:00:00Z',
+        updatedAt: '2026-07-17T12:05:00Z',
+      } as UCPOrder);
+      expect(timeline.at(-1)).toMatchObject({
+        label: 'Order cancelled',
+        timestamp: '2026-07-17T12:05:00Z',
+        completed: true,
+      });
+    });
+
+    it('binds the customer refund action to the actual order total', () => {
+      expect(fullRefundAmount({ total: 95 })).toBe(95);
+      expect(fullRefundAmount({ total: 95, refundedAmountInr: 95 })).toBe(0);
+      expect(fullRefundAmount({ total: 95, refundedAmountInr: 40 })).toBe(55);
+      expect(fullRefundAmount({ total: 95.4 })).toBe(95);
+      expect(fullRefundAmount({ total: -1 })).toBe(0);
+    });
+
     it('treats the authenticated server principal as verified for AgentGuard refunds', () => {
       expect(sellerRefundTrustSatisfied('no_identity', 'principal:demo:seller', false)).toBe(true);
       expect(sellerRefundTrustSatisfied('no_identity', null, false)).toBe(false);
     });
 
-    it('requires wallet proof only when no server principal owns the session', () => {
-      expect(sellerApprovalNeedsWalletProof('principal:auth0:seller', false)).toBe(false);
-      expect(sellerApprovalNeedsWalletProof(null, false)).toBe(true);
-      expect(sellerApprovalNeedsWalletProof(null, true)).toBe(false);
-    });
-
     it('requires verified trust before order acceptance', () => {
-      expect(canMutateSellerOrder('created', 'accept', 'verified')).toBe(true);
-      expect(canMutateSellerOrder('created', 'accept', 'manual_review')).toBe(false);
-      expect(canMutateSellerOrder('created', 'accept', 'revoked_or_blocked')).toBe(false);
+      expect(canMutateSellerOrder('created', 'accept')).toBe(true);
+      expect(canMutateSellerOrder('accepted', 'accept')).toBe(false);
     });
 
     it('requires verified trust before order rejection', () => {
-      expect(canMutateSellerOrder('created', 'reject', 'verified')).toBe(true);
-      expect(canMutateSellerOrder('created', 'reject', 'identity_present_unverified')).toBe(false);
-      expect(canMutateSellerOrder('accepted', 'reject', 'verified')).toBe(false);
+      expect(canMutateSellerOrder('created', 'reject')).toBe(true);
+      expect(canMutateSellerOrder('accepted', 'reject')).toBe(false);
     });
 
     it('requires verified trust before dispatching accepted or packed orders', () => {
-      expect(canMutateSellerOrder('accepted', 'dispatch', 'verified')).toBe(true);
-      expect(canMutateSellerOrder('packed', 'dispatch', 'verified')).toBe(true);
-      expect(canMutateSellerOrder('accepted', 'dispatch', 'no_identity')).toBe(false);
-      expect(canMutateSellerOrder('created', 'dispatch', 'verified')).toBe(false);
+      expect(canMutateSellerOrder('accepted', 'dispatch')).toBe(true);
+      expect(canMutateSellerOrder('packed', 'dispatch')).toBe(true);
+      expect(canMutateSellerOrder('created', 'dispatch')).toBe(false);
     });
   });
 

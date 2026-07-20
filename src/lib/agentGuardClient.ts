@@ -1,68 +1,21 @@
-import { LEGACY_ACTION_ALIASES } from '@aadharchain/agentguard-contract';
+import {
+  LEGACY_ACTION_ALIASES,
+  type AgentRef,
+  type AgentGuardAction,
+  type Approval,
+  type IntentReceipt,
+  type Mandate,
+} from '@aadharchain/agentguard-contract';
 import { TRUST_API_URL } from './identityUrls';
 
-export interface AgentGuardAgent {
-  agent_id: string;
-  wallet_address: string;
-  name: string;
-  status: 'active' | 'paused';
-  policy_id?: string | null;
-}
-
-export interface AgentGuardPolicy {
+/** Current caller: legacy wallet status payload. Delete after 2026-08-01. */
+type LegacyPolicyRecord = {
   policy_id: string;
-  wallet_address: string;
+  wallet_address?: string | null;
   agent_id: string;
   template: string;
   refund_auto_max_inr: number;
-}
-
-export interface AgentGuardMandate {
-  mandate_id: string;
-  agent_id?: string | null;
-  principal_id?: string;
-  role?: 'buyer' | 'seller';
-  status?: string;
-  template?: string;
-  limits?: Record<string, unknown>;
-  allowed_actions?: string[];
-  confirmed_at?: string | null;
-}
-
-export interface AgentGuardApproval {
-  approval_id: string;
-  wallet_address: string;
-  agent_id: string;
-  policy_id: string;
-  action: string;
-  amount_inr: number;
-  resource_id: string;
-  status: string;
-  nonce: string;
-}
-
-export interface AgentGuardReceipt {
-  receipt_id: string;
-  wallet_address: string;
-  agent_id: string;
-  policy_id: string;
-  action: string;
-  amount_inr: number;
-  resource_id: string;
-  outcome: string;
-  approval_id?: string | null;
-  created_at: string;
-}
-
-export interface EvaluateResult {
-  decision: 'allow' | 'need_approval' | 'deny';
-  reason: string;
-  agent: AgentGuardAgent;
-  policy: AgentGuardPolicy;
-  receipt: AgentGuardReceipt | null;
-  approval: AgentGuardApproval | null;
-}
-
+};
 
 /** Legacy wallet body only — social/demo sessions rely on cookie principal. */
 function walletField(walletAddress?: string | null): Record<string, string> {
@@ -85,7 +38,7 @@ export async function ensureAgentGuard(walletAddress?: string | null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...walletField(walletAddress), role: 'seller' }),
   });
-  return parseApi<{ agent: AgentGuardAgent; policy: AgentGuardPolicy; mandate?: AgentGuardMandate | null }>(response);
+  return parseApi<{ agent: AgentRef; policy: LegacyPolicyRecord; mandate?: Mandate | null }>(response);
 }
 
 export async function fetchAgentGuardStatus(walletAddress?: string | null) {
@@ -96,60 +49,21 @@ export async function fetchAgentGuardStatus(walletAddress?: string | null) {
       { credentials: 'include' },
     );
     return parseApi<{
-      agent: AgentGuardAgent | null;
-      policy: AgentGuardPolicy | null;
-      mandate?: AgentGuardMandate | null;
-      receipts: AgentGuardReceipt[];
+      agent: AgentRef | null;
+      policy: LegacyPolicyRecord | null;
+      mandate?: Mandate | null;
+      receipts: IntentReceipt[];
     }>(response);
   }
   const response = await fetch(`${TRUST_API_URL}/api/agentguard/wallets/${walletAddress}`, {
     credentials: 'include',
   });
   return parseApi<{
-    agent: AgentGuardAgent | null;
-    policy: AgentGuardPolicy | null;
-    mandate?: AgentGuardMandate | null;
-    receipts: AgentGuardReceipt[];
+    agent: AgentRef | null;
+    policy: LegacyPolicyRecord | null;
+    mandate?: Mandate | null;
+    receipts: IntentReceipt[];
   }>(response);
-}
-
-export async function evaluateRefund(params: {
-  walletAddress?: string | null;
-  amountInr: number;
-  resourceId: string;
-}) {
-  const response = await fetch(`${TRUST_API_URL}/api/agentguard/actions/evaluate`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...walletField(params.walletAddress),
-      action: LEGACY_ACTION_ALIASES.refund,
-      amount_inr: params.amountInr,
-      resource_id: params.resourceId,
-    }),
-  });
-  return parseApi<EvaluateResult>(response);
-}
-
-export async function consumeApproval(params: {
-  walletAddress?: string | null;
-  approvalId: string;
-}) {
-  const response = await fetch(`${TRUST_API_URL}/api/agentguard/approvals/consume`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...walletField(params.walletAddress),
-      approval_id: params.approvalId,
-    }),
-  });
-  if (response.status === 409) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || 'Approval already consumed (replay rejected).');
-  }
-  return parseApi<{ approval: AgentGuardApproval; receipt: AgentGuardReceipt }>(response);
 }
 
 export async function pauseAgent(params: { walletAddress?: string | null; agentId: string }) {
@@ -162,7 +76,7 @@ export async function pauseAgent(params: { walletAddress?: string | null; agentI
       body: JSON.stringify({ ...walletField(params.walletAddress) }),
     },
   );
-  return parseApi<{ agent: AgentGuardAgent }>(response);
+  return parseApi<{ agent: AgentRef }>(response);
 }
 
 export async function resumeAgent(params: { walletAddress?: string | null; agentId: string }) {
@@ -175,14 +89,14 @@ export async function resumeAgent(params: { walletAddress?: string | null; agent
       body: JSON.stringify({ ...walletField(params.walletAddress) }),
     },
   );
-  return parseApi<{ agent: AgentGuardAgent }>(response);
+  return parseApi<{ agent: AgentRef }>(response);
 }
 
 export async function compileMandate(params: {
   walletAddress?: string | null;
   agentId?: string;
   refundAutoMaxInr?: number;
-  allowedActions?: string[];
+  allowedActions?: AgentGuardAction[];
 }) {
   const refundMax = params.refundAutoMaxInr ?? 5000;
   const response = await fetch(`${TRUST_API_URL}/api/agentguard/mandates/compile`, {
@@ -203,7 +117,7 @@ export async function compileMandate(params: {
       },
     }),
   });
-  return parseApi<{ mandate: AgentGuardMandate }>(response);
+  return parseApi<{ mandate: Mandate }>(response);
 }
 
 export async function confirmMandate(params: { walletAddress?: string | null; mandateId: string }) {
@@ -213,13 +127,13 @@ export async function confirmMandate(params: { walletAddress?: string | null; ma
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...walletField(params.walletAddress) }),
   });
-  return parseApi<{ mandate: AgentGuardMandate }>(response);
+  return parseApi<{ mandate: Mandate }>(response);
 }
 
 /** Preferred mutation boundary: evaluate/consume + commerce executor on the gateway. */
 export async function executeProtectedAction(params: {
   walletAddress?: string | null;
-  action: string;
+  action: AgentGuardAction;
   amountInr: number;
   resourceId: string;
   approvalId?: string;
@@ -244,17 +158,20 @@ export async function executeProtectedAction(params: {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail || 'Protected action conflict (replay or state).');
   }
-  return parseApi<{
+  const data = await parseApi<{
     decision?: string;
-    receipt?: AgentGuardReceipt;
+    receipt?: IntentReceipt;
+    result?: Record<string, unknown>;
     execution?: Record<string, unknown>;
-    approval?: AgentGuardApproval | null;
+    approval?: Approval | null;
   }>(response);
+  const execution = data.execution ?? data.result;
+  return execution ? { ...data, execution } : data;
 }
 
 export async function verifyReceipt(params: {
   receiptId?: string;
-  receipt?: AgentGuardReceipt;
+  receipt?: IntentReceipt;
 }) {
   const response = await fetch(`${TRUST_API_URL}/api/agentguard/receipts/verify`, {
     method: 'POST',
@@ -265,5 +182,5 @@ export async function verifyReceipt(params: {
       receipt: params.receipt,
     }),
   });
-  return parseApi<{ valid: boolean; reason?: string; receipt?: AgentGuardReceipt }>(response);
+  return parseApi<{ valid: boolean; reason?: string; receipt?: IntentReceipt }>(response);
 }

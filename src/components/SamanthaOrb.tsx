@@ -6,6 +6,7 @@ import { extractRealtimeToolCalls } from '../lib/realtimeToolCalls';
 import { formatMemoryForPrompt, loadSamanthaMemory } from '../lib/samanthaMemory';
 import { subscribeSellerRuntimeJob } from '../lib/samanthaRuntimeHandoff';
 import { createSamanthaSessionId, persistSamanthaEvent } from '../lib/samanthaTranscript';
+import { notifySellerCatalogChanged } from '../lib/sellerCatalogEvents';
 import { useSubject } from '../hooks';
 import { cn } from '../lib/utils';
 
@@ -13,13 +14,19 @@ const SELLER_ORB_INSTRUCTIONS =
   'You are Samantha, the ONDC Seller operations companion. Speak briefly. Keep every user-facing reply to at most two short sentences unless the user asks for detail. ' +
   "Interpret the user's intent, then act. " +
   'Greetings or chitchat: reply briefly with no tools. Do not volunteer work they did not ask for. ' +
+  'If the mic audio is unclear, background noise, or not a clear request: stay quiet or ask once — do not invent tools from noise. ' +
   'Actionable short asks: choose and call the right tool(s). Chain several short tools in one turn when one request needs multiple steps. ' +
   'Continue after each function_call_output until the short request is done. Never claim an action without a successful tool call. ' +
+  'Catalog: call catalog_publish with the exact price the user said. If the SKU already exists, that tool updates the same listing — never create a second copy for a price correction. ' +
+  'Pending orders / what needs fulfillment: call list_pending_orders and summarize the tool result; do not claim you cannot see orders after navigate alone. ' +
   'Order actions: use accept_order or reject_order for a paid order, and mark_order_fulfilled after acceptance. Omit order_id when the user means the newest eligible order. ' +
   'Long or multi-step ops: call delegate_to_runtime_agent once. When it returns started, say you started and will let them know when done — ' +
   'never mention another agent, Cursor, or /agent. Never claim longer work finished unless a later update says so. ' +
   'Never invent work the user did not ask for. Report AgentGuard allow / need_approval / deny honestly. Do not send users to /agent. ' +
-  'Short tools: navigate_to, catalog_publish, accept_order, reject_order, mark_order_fulfilled, refund_issue, remember_preference.';
+  'Short tools: navigate_to, catalog_publish, list_pending_orders, accept_order, reject_order, mark_order_fulfilled, refund_issue, remember_preference.';
+
+export const SAMANTHA_EXECUTION_BOUNDARY =
+  'Samantha can answer questions and carry out enabled store actions. AgentGuard checks every protected action; anything outside your limits stops for approval or is denied.';
 
 type OrbState = 'idle' | 'connecting' | 'listening' | 'error';
 
@@ -88,6 +95,13 @@ export function SamanthaOrb() {
   const startInFlightRef = useRef(false);
   /** Queued while connecting — flushed when Realtime is listening. */
   const pendingTextRef = useRef<string | null>(null);
+  const textInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => textInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   useEffect(() => {
     return subscribeSellerRuntimeJob((update) => {
@@ -228,6 +242,10 @@ export function SamanthaOrb() {
           receipt_id: result.receiptId, data: result.data,
         },
       }).catch(() => undefined);
+      // CatalogPage stays mounted on /catalog — force refetch after publish/update.
+      if (result.ok && name === 'catalog_publish') {
+        notifySellerCatalogChanged();
+      }
       if (result.navigateTo) navigate(result.navigateTo);
       const dc = dcRef.current;
       if (!dc || dc.readyState !== 'open') return;
@@ -310,7 +328,19 @@ export function SamanthaOrb() {
         instructions: SELLER_ORB_INSTRUCTIONS,
         audio: {
           input: {
-            turn_detection: usedMic ? { type: 'semantic_vad' } : null,
+            // Match Buyer: server_vad + higher threshold so room noise
+            // does not fire ghost turns under default semantic_vad.
+            turn_detection: usedMic
+              ? {
+                  type: 'server_vad',
+                  threshold: 0.82,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 700,
+                  create_response: true,
+                  interrupt_response: true,
+                }
+              : null,
+            noise_reduction: usedMic ? { type: 'far_field' } : null,
             transcription: usedMic ? { model: 'gpt-4o-mini-transcribe' } : null,
           },
         },
@@ -404,9 +434,10 @@ export function SamanthaOrb() {
           responseActiveRef.current = true;
           toolFollowupRequestedRef.current = false;
           toolFollowupSentRef.current = false;
-          if (replyBufRef.current && !/\s$/.test(replyBufRef.current)) {
-            replyBufRef.current += ' ';
-          }
+          // Fresh reply each model response — do not concatenate prior turns.
+          replyBufRef.current = '';
+          lastPersistedReplyRef.current = '';
+          setReply('');
         }
         if (
           msg.type === 'response.output_audio_transcript.delta' ||
@@ -524,7 +555,13 @@ export function SamanthaOrb() {
 
     let usedMic = false;
     try {
-      const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ms = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+        },
+      });
       if (!stillActive()) {
         ms.getTracks().forEach((t) => t.stop());
         return;
@@ -642,8 +679,27 @@ export function SamanthaOrb() {
         <div
           className="pointer-events-auto w-[340px] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border/70 bg-card/95 px-4 py-3 text-sm shadow-[var(--surface-lift)] backdrop-blur-xl"
           data-testid="samantha-orb-panel"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="seller-samantha-title"
+          aria-describedby="seller-samantha-boundary"
         >
-          <p className="text-base font-semibold tracking-tight text-foreground">Samantha</p>
+          <div className="flex items-start justify-between gap-3">
+            <h2 id="seller-samantha-title" className="text-base font-semibold tracking-tight text-foreground">
+              Samantha
+            </h2>
+            <button
+              type="button"
+              className="rounded-full px-2 py-1 text-xs text-muted-foreground transition hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={toggle}
+              aria-label="Close Samantha"
+            >
+              Close
+            </button>
+          </div>
+          <p id="seller-samantha-boundary" className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {SAMANTHA_EXECUTION_BOUNDARY}
+          </p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>
           {reply ? (
             <div
@@ -655,6 +711,7 @@ export function SamanthaOrb() {
           ) : null}
           <form className="mt-3 flex gap-2" onSubmit={sendText}>
             <input
+              ref={textInputRef}
               type="text"
               aria-label="Ask Samantha"
               value={draft}
@@ -662,6 +719,9 @@ export function SamanthaOrb() {
               placeholder="Ask Samantha"
               data-testid="samantha-orb-text"
               className="min-w-0 flex-1 rounded-full border border-border bg-background px-3 py-2 text-xs outline-none transition focus:ring-2 focus:ring-ring/40"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') toggle();
+              }}
             />
             <button
               type="submit"
@@ -677,7 +737,7 @@ export function SamanthaOrb() {
             className="mt-2 text-xs text-primary hover:underline"
             onClick={() => navigate('/agentguard')}
           >
-            AgentGuard and memory
+            Assistant permissions and memory
           </button>
         </div>
       ) : null}

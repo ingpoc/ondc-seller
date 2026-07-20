@@ -24,6 +24,14 @@ interface SellerCatalogItem {
   };
   category_id?: string;
   images?: Array<{ url?: string }>;
+  price?: { currency?: string; value?: string };
+  quantity?: number;
+}
+
+export function categoryCountHint(categoryCount: number): string {
+  if (categoryCount === 0) return 'No categories yet';
+  if (categoryCount === 1) return 'One category so far';
+  return 'Multiple demand lanes';
 }
 
 export function DashboardPage() {
@@ -52,17 +60,17 @@ export function DashboardPage() {
 
   return (
     <PageLayout
-      title={isAuthenticated ? 'Your catalog' : 'Browse the catalog'}
+      title={isAuthenticated ? 'Seller dashboard' : 'Browse the catalog'}
       subtitle={
         isAuthenticated
-          ? 'Manage the products buyers can discover on the ONDC network.'
-          : 'View products currently available from this ONDC Seller.'
+          ? 'Monitor catalog readiness, seller access, and your next operational actions.'
+          : 'View products currently available from this seller.'
       }
     >
       <Section
         actions={
           <div className="flex flex-wrap gap-3">
-            {isAuthenticated ? (
+            {isAuthenticated && itemCount > 0 ? (
               <Button
                 type="button"
                 onClick={() => navigate('/catalog/new')}
@@ -71,12 +79,9 @@ export function DashboardPage() {
                 Add product
               </Button>
             ) : null}
-            <Button type="button" variant="secondary" onClick={() => navigate('/catalog')}>
-              {isAuthenticated ? 'Open catalog' : 'Browse catalog'}
-            </Button>
-            {isAuthenticated ? (
-              <Button type="button" variant="outline" onClick={() => navigate('/agentguard')}>
-                AgentGuard
+            {!isAuthenticated || itemCount > 0 ? (
+              <Button type="button" variant="secondary" onClick={() => navigate('/catalog')}>
+                {isAuthenticated ? 'Open catalog' : 'Browse catalog'}
               </Button>
             ) : null}
           </div>
@@ -92,17 +97,22 @@ export function DashboardPage() {
         ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard label="Products" value={itemCount} hint="Live listings in the ONDC catalog" />
+          <StatCard label="Products" value={itemCount} hint="Listings in your ONDC catalog" />
           <StatCard
             label="Categories"
             value={categoryCount}
-            hint={categoryCount > 1 ? 'Multiple demand lanes' : 'Single category so far'}
+            hint={categoryCountHint(categoryCount)}
             tone="info"
           />
           <StatCard
-            label="Trust"
-            value={trustLabel}
-            hint={trust.reason ?? 'Required for elevated publish actions'}
+            label="Signed-in identity"
+            value={elevatedOk ? 'Verified' : trustLabel}
+            hint={
+              trust.reason ??
+              (elevatedOk
+                ? 'Identity only. Store connection is checked separately in Settings; authority is shown in Assistant permissions.'
+                : 'Required for protected seller operations')
+            }
             tone={elevatedOk ? 'success' : 'warning'}
           />
         </div>
@@ -167,7 +177,12 @@ export function DashboardPage() {
                     {item.descriptor?.short_desc ?? 'Add a short descriptor for buyer cards.'}
                   </div>
                 </div>
-                <Badge tone="info">{item.category_id ?? 'general'}</Badge>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <Badge tone="info">{item.category_id ?? 'general'}</Badge>
+                  <div className="text-sm font-medium text-foreground">
+                    {item.price?.currency ?? 'INR'} {item.price?.value ?? '0'} · {item.quantity ?? 0} in stock
+                  </div>
+                </div>
               </button>
             ))}
           </div>

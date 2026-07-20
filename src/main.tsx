@@ -4,19 +4,21 @@ import { BrowserRouter } from 'react-router-dom';
 import { Analytics } from '@vercel/analytics/react';
 import { App } from './App';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { WalletProvider } from '@/providers/WalletProvider';
+import { ensureCanonicalLoopbackHost } from '@/lib/loopback';
 import './app.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <WalletProvider>
+if (ensureCanonicalLoopbackHost()) {
+  // Redirecting localhost → 127.0.0.1 so Auth0 gateway cookie can attach.
+} else {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <BrowserRouter>
         <AuthProvider>
           <App />
           {/* Hobby-free Web Analytics only — Speed Insights limited to 1 project (Buyer) */}
           <Analytics />
         </AuthProvider>
-      </WalletProvider>
-    </BrowserRouter>
-  </React.StrictMode>
-);
+      </BrowserRouter>
+    </React.StrictMode>,
+  );
+}

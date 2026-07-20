@@ -15,6 +15,10 @@ export function useSubject() {
     authLoading,
     subjectId,
     principalId,
+    displayName:
+      typeof user?.display_name === 'string' && user.display_name.trim()
+        ? user.display_name.trim()
+        : null,
     /** Present only for legacy wallet sessions. Prefer principalId. */
     walletAddress,
   };

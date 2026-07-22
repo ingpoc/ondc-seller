@@ -1,5 +1,4 @@
 import {
-  LEGACY_ACTION_ALIASES,
   type AgentRef,
   type AgentGuardAction,
   type Approval,

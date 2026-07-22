@@ -9,7 +9,7 @@ import type { ProductFormData } from '../components/ProductForm';
 import { clearConsumedSellerDraft, getDraftFormDataForRoute } from '../lib/agentSellerState';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import { executeProtectedAction } from '../lib/agentGuardClient';
-import { Alert, Button, Card, PageLayout, PageHeader } from '@/components/seller-ui';
+import { Alert, Card, PageLayout, PageHeader } from '@/components/seller-ui';
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();

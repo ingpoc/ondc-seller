@@ -11,6 +11,7 @@ import {
   canMutateSellerOrder,
   fullRefundAmount,
   getOrderTimeline,
+  normalizeTrackingId,
   OrderDetailPage,
   refundConfirmationCopy,
   sellerRefundTrustSatisfied,
@@ -193,6 +194,16 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
     it('should have dispatch button', () => {
       const actions = ['Accept Order', 'Reject Order', 'Dispatch Order'];
       expect(actions).toContain('Dispatch Order');
+    });
+  });
+
+  describe('Dispatch tracking entry', () => {
+    it('trims a customer-provided tracking ID', () => {
+      expect(normalizeTrackingId('  SHIP-123456  ')).toBe('SHIP-123456');
+    });
+
+    it('rejects empty tracking IDs', () => {
+      expect(normalizeTrackingId('   ')).toBeNull();
     });
   });
 

@@ -78,7 +78,7 @@ export const SELLER_ACTION_POLICY: Record<
   },
   seller_config_save: {
     requiredTrustState: 'verified',
-    reason: 'Seller configuration can affect routing, payouts, credentials, and network identity.',
+    reason: 'Seller configuration can affect routing, credentials, and network identity.',
   },
   seller_config_generate_keys: {
     requiredTrustState: 'verified',

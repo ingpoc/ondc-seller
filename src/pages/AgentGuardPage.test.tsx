@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AgentGuardPage } from './AgentGuardPage';
+import { SellerAssistantSettings } from './AgentGuardPage';
 
 const agentClient = vi.hoisted(() => ({
   ensureAgentGuard: vi.fn(),
@@ -76,7 +76,7 @@ describe('AgentGuardPage authority state', () => {
   it('shows the ensured active authority when the follow-up status read is empty', async () => {
     render(
       <MemoryRouter initialEntries={['/agentguard']}>
-        <AgentGuardPage />
+        <SellerAssistantSettings showPageChrome />
       </MemoryRouter>,
     );
 
@@ -87,9 +87,9 @@ describe('AgentGuardPage authority state', () => {
     );
     expect(screen.getByRole('button', { name: 'Save authority changes' })).toBeEnabled();
     expect(screen.queryByText('template ready')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'Current authority' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'Samantha memory' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'Receipts (PII-free)' })).toBeInTheDocument();
+    expect(screen.getByText('Seller agent permissions')).toBeInTheDocument();
+    expect(screen.getByText('Samantha memory')).toBeInTheDocument();
+    expect(screen.getByText('Protected activity')).toBeInTheDocument();
     expect(screen.getByText(/Samantha is your Seller operations assistant/)).toHaveTextContent(
       'AgentGuard checks every action independently',
     );
@@ -107,7 +107,7 @@ describe('AgentGuardPage authority state', () => {
 
     render(
       <MemoryRouter initialEntries={['/agentguard']}>
-        <AgentGuardPage />
+        <SellerAssistantSettings showPageChrome />
       </MemoryRouter>,
     );
 
@@ -136,7 +136,7 @@ describe('AgentGuardPage authority state', () => {
 
     render(
       <MemoryRouter initialEntries={['/agentguard']}>
-        <AgentGuardPage />
+        <SellerAssistantSettings showPageChrome />
       </MemoryRouter>,
     );
 

@@ -18,7 +18,7 @@ interface SellerClientConfig {
 }
 
 // Import the component to ensure TypeScript compilation
-import { ConfigPage } from './ConfigPage';
+import { ConfigPage, isNetworkConfigComplete } from './ConfigPage';
 
 describe('Seller ConfigPage (SDK-SELLER-CONFIG-001)', () => {
   it('should export ConfigPage component', () => {
@@ -289,5 +289,39 @@ describe('Seller ConfigPage (SDK-SELLER-CONFIG-001)', () => {
       const helpTopics = ['Generate New Key Pair', 'Save Configuration', 'Test Connection'];
       expect(helpTopics).toContain('Test Connection');
     });
+  });
+});
+
+describe('seller network configuration readiness', () => {
+  const completeConfig: SellerClientConfig = {
+    baseUrl: 'https://gateway.example',
+    subscriberId: 'seller.example',
+    privateKey: 'private-key-material',
+    keyId: 'seller-key-1',
+    domain: 'nic2004:52110',
+    country: 'IND',
+    city: 'std:080',
+    timeout: 30000,
+  };
+
+  it('requires every connection detail before save or test can be used', () => {
+    expect(isNetworkConfigComplete(completeConfig)).toBe(true);
+
+    for (const field of [
+      'baseUrl',
+      'subscriberId',
+      'privateKey',
+      'keyId',
+      'domain',
+      'country',
+      'city',
+    ] as const) {
+      expect(isNetworkConfigComplete({ ...completeConfig, [field]: '' })).toBe(false);
+    }
+    expect(isNetworkConfigComplete({ ...completeConfig, timeout: 0 })).toBe(false);
+  });
+
+  it('rejects an invalid subscriber identity even when every field is non-empty', () => {
+    expect(isNetworkConfigComplete({ ...completeConfig, subscriberId: 'bad id' })).toBe(false);
   });
 });

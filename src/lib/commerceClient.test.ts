@@ -96,6 +96,33 @@ describe('mapDemoOrderToSellerOrder', () => {
     expect(mapped.fulfillment?.providerName).toBeUndefined();
     expect(mapped.payment).toBeUndefined();
   });
+
+  it('projects a succeeded full refund as a terminal cancelled and refunded order', () => {
+    const mapped = mapDemoOrderToSellerOrder({
+      order_id: 'order-refunded',
+      transaction_id: 'txn-refunded',
+      message_id: 'msg-refunded',
+      buyer_id: 'buyer-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_title: 'Whole Wheat Atta 1kg',
+      item_version: 1,
+      quantity: 1,
+      amount_inr: 89,
+      status: 'paid',
+      refunded_amount_inr: 89,
+      refund_status: 'succeeded',
+      payment: { status: 'succeeded' },
+      created_at: '2026-07-16T12:00:00Z',
+      updated_at: '2026-07-16T12:00:00Z',
+    });
+
+    expect(mapped.status).toBe('cancelled');
+    expect(mapped.fulfillment?.status).toBe('cancelled');
+    expect(mapped.refundedAmountInr).toBe(89);
+    expect(mapped.refundStatus).toBe('refunded');
+    expect(paymentStatusLabel(mapped.paymentStatus)).toBe('Refunded');
+  });
 });
 
 describe('Seller commerce read boundary', () => {

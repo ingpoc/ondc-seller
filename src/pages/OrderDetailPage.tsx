@@ -4,6 +4,17 @@ import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { TrustNotice } from '@/components/TrustStatus';
 import { useSubject, useTrustState } from '@/hooks';
@@ -28,6 +39,11 @@ const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created'
 const canDispatchOrder = (status: UCPOrderStatus): boolean =>
   ['accepted', 'packed'].includes(status);
 type SellerOrderMutation = 'accept' | 'reject' | 'dispatch';
+
+export function normalizeTrackingId(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
 
 export function canMutateSellerOrder(
   status: UCPOrderStatus,
@@ -156,6 +172,8 @@ export function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
+  const [trackingId, setTrackingId] = useState('');
   const [pendingApproval, setPendingApproval] = useState<Approval | null>(null);
   const [refundConfirmation, setRefundConfirmation] = useState<number | null>(null);
   const [lastReceipt, setLastReceipt] = useState<IntentReceipt | null>(null);
@@ -304,7 +322,7 @@ export function OrderDetailPage() {
     }
   }
 
-  async function handleDispatch() {
+  async function handleDispatch(requestedTrackingId: string) {
     if (!order || !id) return;
     if (!canMutateSellerOrder(order.status, 'dispatch')) {
       recordSellerActionAuditEvent({
@@ -319,8 +337,11 @@ export function OrderDetailPage() {
       setError('This order cannot be dispatched from its current status.');
       return;
     }
-    const trackingId = prompt('Enter tracking ID:');
-    if (!trackingId) return;
+    const normalizedTrackingId = normalizeTrackingId(requestedTrackingId);
+    if (!normalizedTrackingId) {
+      setError('Enter a tracking ID before dispatching this order.');
+      return;
+    }
 
     setProcessing('dispatch');
     try {
@@ -330,7 +351,11 @@ export function OrderDetailPage() {
         amountInr: 0,
         resourceId: id,
         idempotencyKey: `seller.fulfilment.commit:${id}`,
-        payload: { order_id: id, tracking_id: trackingId, provider_name: 'Standard Courier' },
+        payload: {
+          order_id: id,
+          tracking_id: normalizedTrackingId,
+          provider_name: 'Standard Courier',
+        },
       });
       if (!executed.execution) {
         throw new Error(
@@ -349,6 +374,8 @@ export function OrderDetailPage() {
         reason: 'Dispatched seller order through commerce API.',
       });
       setOrder(await getCommerceOrder(id));
+      setDispatchDialogOpen(false);
+      setTrackingId('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch order');
     } finally {
@@ -639,16 +666,74 @@ export function OrderDetailPage() {
           </Button>
         ) : null}
         {canDispatchOrder(order.status) ? (
-          <Button
-            disabled={
-              processing === 'dispatch' ||
-              trust.loading ||
-              !canMutateSellerOrder(order.status, 'dispatch')
-            }
-            onClick={() => void handleDispatch()}
+          <Dialog
+            open={dispatchDialogOpen}
+            onOpenChange={(open) => {
+              if (processing !== 'dispatch') {
+                setDispatchDialogOpen(open);
+                if (!open) setTrackingId('');
+              }
+            }}
           >
-            {processing === 'dispatch' ? 'Processing…' : 'Dispatch order'}
-          </Button>
+            <DialogTrigger asChild>
+              <Button
+                disabled={
+                  processing === 'dispatch' ||
+                  trust.loading ||
+                  !canMutateSellerOrder(order.status, 'dispatch')
+                }
+              >
+                Dispatch order
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <form
+                className="space-y-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleDispatch(trackingId);
+                }}
+              >
+                <DialogHeader>
+                  <DialogTitle>Dispatch order</DialogTitle>
+                  <DialogDescription>
+                    Enter the courier tracking ID. This will mark the order as dispatched and share
+                    the tracking reference with the customer.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2">
+                  <Label htmlFor="dispatch-tracking-id">Tracking ID</Label>
+                  <Input
+                    id="dispatch-tracking-id"
+                    name="trackingId"
+                    autoComplete="off"
+                    autoFocus
+                    value={trackingId}
+                    onChange={(event) => setTrackingId(event.target.value)}
+                    placeholder="For example, SHIP-123456"
+                    disabled={processing === 'dispatch'}
+                    required
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={processing === 'dispatch'}
+                    onClick={() => setDispatchDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={processing === 'dispatch' || !normalizeTrackingId(trackingId)}
+                  >
+                    {processing === 'dispatch' ? 'Dispatching…' : 'Confirm dispatch'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         ) : null}
       </div>
 

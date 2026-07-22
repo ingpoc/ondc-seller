@@ -27,11 +27,14 @@ describe('Seller product copy', () => {
     expect(sellerUi).toContain('ONDC network connection');
     expect(sellerUi).toContain('listings, customer orders, protected refunds, and assistant permissions');
     expect(sellerUi).not.toContain("label: auth_mode");
-    expect(sellerUi).toContain('Seller connection settings');
+    expect(sellerUi).toContain('Seller settings');
     expect(sellerUi).not.toContain('Connect your Seller account to AgentGuard');
     expect(sellerUi).toContain('Generated keys are not active until you save this configuration');
     expect(sellerUi).not.toContain('PreProd');
     expect(sellerUi).not.toContain('Demo scope');
+    expect(sellerUi).not.toContain('payout or seller configuration');
+    expect(sellerUi).toContain('Agent Guard');
+    expect(sellerUi).toContain('Profile details');
     expect(manifest).not.toContain('@solana/');
     expect(manifest).not.toContain('"bs58"');
     expect(entrypoint).not.toContain('WalletProvider');

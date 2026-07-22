@@ -9,7 +9,7 @@ import { render, screen } from '@testing-library/react';
 import type { UCPOrderStatus } from '@ondc-sdk/shared';
 
 // Import the component to ensure TypeScript compilation
-import { OrdersPage, OrderCard } from './OrdersPage';
+import { OrdersPage, OrderCard, OrderFilterButton } from './OrdersPage';
 
 describe('Seller OrdersPage (SDK-SELLER-ORDERS-002)', () => {
   it('should export OrdersPage component', () => {
@@ -23,6 +23,33 @@ describe('Seller OrdersPage (SDK-SELLER-ORDERS-002)', () => {
   });
 
   describe('Seller status filtering', () => {
+    it('exposes the active filter to assistive technology', () => {
+      const { rerender } = render(
+        React.createElement(OrderFilterButton, {
+          filter: 'pending',
+          count: 2,
+          active: true,
+        })
+      );
+
+      expect(screen.getByRole('button', { name: 'pending 2' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+
+      rerender(
+        React.createElement(OrderFilterButton, {
+          filter: 'pending',
+          count: 2,
+          active: false,
+        })
+      );
+      expect(screen.getByRole('button', { name: 'pending 2' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+    });
+
     const isPendingStatus = (status: UCPOrderStatus): boolean => status === 'created';
     const isAcceptedStatus = (status: UCPOrderStatus): boolean =>
       ['accepted', 'packed'].includes(status);

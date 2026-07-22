@@ -112,6 +112,10 @@ export function mapDemoItemToCatalogItem(
 }
 
 export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerCommerceOrder {
+  const refundStatus = String(order.refund_status || '').trim().toLowerCase();
+  const fullyRefunded =
+    (refundStatus === 'succeeded' || refundStatus === 'refunded') &&
+    Number(order.refunded_amount_inr || 0) >= Number(order.amount_inr || 0);
   const statusByCommerceStatus: Record<string, UCPOrderStatus> = {
     paid: 'created',
     accepted: 'accepted',
@@ -121,7 +125,7 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     cancelled: 'cancelled',
     unknown: 'created',
   };
-  const status = statusByCommerceStatus[order.status] ?? 'created';
+  const status = fullyRefunded ? 'cancelled' : statusByCommerceStatus[order.status] ?? 'created';
   const total = order.amount_inr;
   const unitPrice = total / Math.max(order.quantity, 1);
   const delivery = order.delivery_address;
@@ -161,9 +165,9 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
       },
     },
     refundedAmountInr: order.refunded_amount_inr ?? 0,
-    refundStatus: order.refund_status,
+    refundStatus: fullyRefunded ? 'refunded' : order.refund_status,
     paymentStatus:
-      order.refund_status ||
+      (fullyRefunded ? 'refunded' : order.refund_status) ||
       (order.payment?.status === 'succeeded' || order.status === 'paid'
         ? 'paid'
         : order.payment?.status),

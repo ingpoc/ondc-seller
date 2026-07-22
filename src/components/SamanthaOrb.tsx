@@ -1,7 +1,12 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TRUST_API_URL } from '../lib/identityUrls';
-import { SELLER_TOOL_DEFINITIONS, runSellerTool, type SellerToolName } from '../lib/agentTools';
+import {
+  SELLER_TOOL_DEFINITIONS,
+  runSellerTool,
+  type SellerToolName,
+  type SellerToolResult,
+} from '../lib/agentTools';
 import { extractRealtimeToolCalls } from '../lib/realtimeToolCalls';
 import { formatMemoryForPrompt, loadSamanthaMemory } from '../lib/samanthaMemory';
 import { subscribeSellerRuntimeJob } from '../lib/samanthaRuntimeHandoff';
@@ -19,7 +24,7 @@ const SELLER_ORB_INSTRUCTIONS =
   'Continue after each function_call_output until the short request is done. Never claim an action without a successful tool call. ' +
   'Catalog: call catalog_publish with the exact price the user said. If the SKU already exists, that tool updates the same listing — never create a second copy for a price correction. ' +
   'Pending orders / what needs fulfillment: call list_pending_orders and summarize the tool result; do not claim you cannot see orders after navigate alone. ' +
-  'Order actions: use accept_order or reject_order for a paid order, and mark_order_fulfilled after acceptance. Omit order_id when the user means the newest eligible order. ' +
+  'Order actions: first read the queue, then use the exact returned order_id for accept_order, reject_order, or mark_order_fulfilled. Never guess or omit an order id. ' +
   'Long or multi-step ops: call delegate_to_runtime_agent once. When it returns started, say you started and will let them know when done — ' +
   'never mention another agent, Cursor, or /agent. Never claim longer work finished unless a later update says so. ' +
   'Never invent work the user did not ask for. Report AgentGuard allow / need_approval / deny honestly. Do not send users to /agent. ' +
@@ -27,8 +32,22 @@ const SELLER_ORB_INSTRUCTIONS =
 
 export const SAMANTHA_EXECUTION_BOUNDARY =
   'Samantha can answer questions and carry out enabled store actions. AgentGuard checks every protected action; anything outside your limits stops for approval or is denied.';
+export const SAMANTHA_SETTINGS_PATH = '/config?tab=samantha';
+
+export function groundedSellerToolReply(
+  results: Array<Pick<SellerToolResult, 'ok' | 'message'>>,
+): string {
+  return results
+    .map((result) => `${result.ok ? 'Completed' : 'Not completed'}: ${result.message}`)
+    .join('\n');
+}
 
 type OrbState = 'idle' | 'connecting' | 'listening' | 'error';
+type MicrophoneState = 'off' | 'on';
+
+export function samanthaReadyHint(usedMic: boolean): string {
+  return usedMic ? 'Voice and text ready · microphone on' : 'Text ready · microphone off';
+}
 
 function replyForDisplay(text: string): string {
   return text
@@ -79,6 +98,7 @@ export function SamanthaOrb() {
   const [hint, setHint] = useState('Tap for Samantha (voice or text)');
   const [draft, setDraft] = useState('');
   const [reply, setReply] = useState('');
+  const [microphoneState, setMicrophoneState] = useState<MicrophoneState>('off');
   /** null = status not loaded yet (do not treat as missing OpenAI key). */
   const [configured, setConfigured] = useState<boolean | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -86,6 +106,7 @@ export function SamanthaOrb() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const handledCallsRef = useRef<Set<string>>(new Set());
   const turnToolCallCountRef = useRef(0);
+  const turnToolResultsRef = useRef<Array<Pick<SellerToolResult, 'ok' | 'message'>>>([]);
   const responseActiveRef = useRef(false);
   const toolFollowupRequestedRef = useRef(false);
   const toolFollowupSentRef = useRef(false);
@@ -204,14 +225,17 @@ export function SamanthaOrb() {
         args = {};
       }
       void persistSamanthaEvent({
-        role: 'seller', sessionId: transcriptSessionIdRef.current,
-        eventType: 'tool_call', content: name,
+        role: 'seller',
+        sessionId: transcriptSessionIdRef.current,
+        eventType: 'tool_call',
+        content: name,
         metadata: { call_id: callId, arguments: args },
       }).catch(() => undefined);
       const result = await runSellerTool(name as SellerToolName, args, {
         walletAddress: walletAddress || '',
         subjectId: subjectId || '',
       });
+      turnToolResultsRef.current.push({ ok: result.ok, message: result.message });
       setHint(result.message);
       // Evidence for Hermes / operators — tool applied in the UI host.
       try {
@@ -219,27 +243,33 @@ export function SamanthaOrb() {
           __samanthaTools?: Array<Record<string, unknown>>;
         };
         w.__samanthaTools = w.__samanthaTools || [];
-          w.__samanthaTools.push({
+        w.__samanthaTools.push({
           at: Date.now(),
           name,
           callId,
           ok: result.ok,
-            message: result.message,
-            navigateTo: result.navigateTo ?? null,
-            decision: result.decision ?? null,
-            receiptId: result.receiptId ?? null,
-            data: result.data ?? null,
-          });
+          message: result.message,
+          navigateTo: result.navigateTo ?? null,
+          decision: result.decision ?? null,
+          receiptId: result.receiptId ?? null,
+          data: result.data ?? null,
+        });
       } catch {
         /* ignore */
       }
       void persistSamanthaEvent({
-        role: 'seller', sessionId: transcriptSessionIdRef.current,
-        eventType: 'tool_result', content: result.message,
+        role: 'seller',
+        sessionId: transcriptSessionIdRef.current,
+        eventType: 'tool_result',
+        content: result.message,
         metadata: {
-          call_id: callId, tool: name, ok: result.ok,
-          navigate_to: result.navigateTo, decision: result.decision,
-          receipt_id: result.receiptId, data: result.data,
+          call_id: callId,
+          tool: name,
+          ok: result.ok,
+          navigate_to: result.navigateTo,
+          decision: result.decision,
+          receipt_id: result.receiptId,
+          data: result.data,
         },
       }).catch(() => undefined);
       // CatalogPage stays mounted on /catalog — force refetch after publish/update.
@@ -286,13 +316,15 @@ export function SamanthaOrb() {
     dcRef.current = null;
     handledCallsRef.current.clear();
     turnToolCallCountRef.current = 0;
+    turnToolResultsRef.current = [];
     responseActiveRef.current = false;
     toolFollowupRequestedRef.current = false;
     toolFollowupSentRef.current = false;
     markSamanthaTurn(false, 'stopped');
     replyBufRef.current = '';
     void persistSamanthaEvent({
-      role: 'seller', sessionId: transcriptSessionIdRef.current,
+      role: 'seller',
+      sessionId: transcriptSessionIdRef.current,
       eventType: 'session_stopped',
     }).catch(() => undefined);
     if (audioRef.current) {
@@ -305,6 +337,13 @@ export function SamanthaOrb() {
       /* already closed */
     }
     setState('idle');
+    setMicrophoneState('off');
+  }
+
+  function turnOffMicrophone() {
+    pcRef.current?.getSenders().forEach((sender) => sender.track?.stop());
+    setMicrophoneState('off');
+    setHint('Text ready · microphone off');
   }
 
   function appendReply(chunk: string) {
@@ -376,21 +415,27 @@ export function SamanthaOrb() {
         }
         if (msg.type === 'session.updated') {
           setState('listening');
-          setHint(usedMic ? 'Listening + text ready' : 'Text mode ready (no mic)');
+          setMicrophoneState(usedMic ? 'on' : 'off');
+          setHint(samanthaReadyHint(usedMic));
           void persistSamanthaEvent({
-            role: 'seller', sessionId: transcriptSessionIdRef.current,
-            eventType: 'session_started', metadata: { mode: usedMic ? 'voice' : 'text', model },
+            role: 'seller',
+            sessionId: transcriptSessionIdRef.current,
+            eventType: 'session_started',
+            metadata: { mode: usedMic ? 'voice' : 'text', model },
           }).catch(() => undefined);
           const pending = pendingTextRef.current;
           if (pending && dc.readyState === 'open') {
             pendingTextRef.current = null;
             turnToolCallCountRef.current = 0;
+            turnToolResultsRef.current = [];
             toolFollowupRequestedRef.current = false;
             toolFollowupSentRef.current = false;
             markSamanthaTurn(true, 'user_text');
             void persistSamanthaEvent({
-              role: 'seller', sessionId: transcriptSessionIdRef.current,
-              eventType: 'user_text', content: pending,
+              role: 'seller',
+              sessionId: transcriptSessionIdRef.current,
+              eventType: 'user_text',
+              content: pending,
             }).catch(() => undefined);
             replyBufRef.current = '';
             setReply('');
@@ -417,16 +462,20 @@ export function SamanthaOrb() {
           setHint(`Samantha error: ${String(detail).slice(0, 160)}`);
           markSamanthaTurn(false, 'error');
           void persistSamanthaEvent({
-            role: 'seller', sessionId: transcriptSessionIdRef.current,
-            eventType: 'error', content: String(detail).slice(0, 4_000),
+            role: 'seller',
+            sessionId: transcriptSessionIdRef.current,
+            eventType: 'error',
+            content: String(detail).slice(0, 4_000),
           }).catch(() => undefined);
         }
         if (msg.type === 'conversation.item.input_audio_transcription.completed') {
           const transcript = String(msg.transcript || msg.text || '').trim();
           if (transcript) {
             void persistSamanthaEvent({
-              role: 'seller', sessionId: transcriptSessionIdRef.current,
-              eventType: 'user_voice_transcript', content: transcript,
+              role: 'seller',
+              sessionId: transcriptSessionIdRef.current,
+              eventType: 'user_voice_transcript',
+              content: transcript,
             }).catch(() => undefined);
           }
         }
@@ -461,12 +510,19 @@ export function SamanthaOrb() {
           if (replyBufRef.current.trim() && turnToolCallCountRef.current === 0) {
             setHint('Samantha replied');
           }
+          const groundedReply = groundedSellerToolReply(turnToolResultsRef.current);
+          if (turnToolCallCountRef.current > 0 && groundedReply) {
+            replyBufRef.current = groundedReply;
+            setReply(groundedReply);
+          }
           const finalReply = replyBufRef.current.trim();
           if (finalReply && finalReply !== lastPersistedReplyRef.current) {
             lastPersistedReplyRef.current = finalReply;
             void persistSamanthaEvent({
-              role: 'seller', sessionId: transcriptSessionIdRef.current,
-              eventType: 'assistant_text', content: finalReply,
+              role: 'seller',
+              sessionId: transcriptSessionIdRef.current,
+              eventType: 'assistant_text',
+              content: finalReply,
             }).catch(() => undefined);
           }
         }
@@ -509,6 +565,7 @@ export function SamanthaOrb() {
     transcriptSessionIdRef.current = createSamanthaSessionId('seller');
     lastPersistedReplyRef.current = '';
     turnToolCallCountRef.current = 0;
+    turnToolResultsRef.current = [];
     responseActiveRef.current = false;
     toolFollowupRequestedRef.current = false;
     toolFollowupSentRef.current = false;
@@ -629,12 +686,15 @@ export function SamanthaOrb() {
     }
     replyBufRef.current = '';
     turnToolCallCountRef.current = 0;
+    turnToolResultsRef.current = [];
     toolFollowupRequestedRef.current = false;
     toolFollowupSentRef.current = false;
     markSamanthaTurn(true, 'user_text');
     void persistSamanthaEvent({
-      role: 'seller', sessionId: transcriptSessionIdRef.current,
-      eventType: 'user_text', content: text,
+      role: 'seller',
+      sessionId: transcriptSessionIdRef.current,
+      eventType: 'user_text',
+      content: text,
     }).catch(() => undefined);
     setReply('');
     pendingTextRef.current = null;
@@ -685,7 +745,10 @@ export function SamanthaOrb() {
           aria-describedby="seller-samantha-boundary"
         >
           <div className="flex items-start justify-between gap-3">
-            <h2 id="seller-samantha-title" className="text-base font-semibold tracking-tight text-foreground">
+            <h2
+              id="seller-samantha-title"
+              className="text-base font-semibold tracking-tight text-foreground"
+            >
               Samantha
             </h2>
             <button
@@ -697,10 +760,29 @@ export function SamanthaOrb() {
               Close
             </button>
           </div>
-          <p id="seller-samantha-boundary" className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          <p
+            id="seller-samantha-boundary"
+            className="mt-1 text-xs leading-relaxed text-muted-foreground"
+          >
             {SAMANTHA_EXECUTION_BOUNDARY}
           </p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>
+          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span role="status">
+              {microphoneState === 'on'
+                ? 'Microphone on — Samantha can hear audio.'
+                : 'Microphone off — Samantha only receives typed messages.'}
+            </span>
+            {microphoneState === 'on' ? (
+              <button
+                type="button"
+                className="shrink-0 text-primary hover:underline"
+                onClick={turnOffMicrophone}
+              >
+                Turn off microphone
+              </button>
+            ) : null}
+          </div>
           {reply ? (
             <div
               className="mt-2 max-h-40 whitespace-pre-wrap overflow-y-auto border-t border-border/50 pt-2 text-xs leading-relaxed text-foreground"
@@ -735,7 +817,7 @@ export function SamanthaOrb() {
           <button
             type="button"
             className="mt-2 text-xs text-primary hover:underline"
-            onClick={() => navigate('/agentguard')}
+            onClick={() => navigate(SAMANTHA_SETTINGS_PATH)}
           >
             Assistant permissions and memory
           </button>

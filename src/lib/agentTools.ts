@@ -93,16 +93,23 @@ export const SELLER_NAV_ALLOWLIST = [
   '/orders',
   '/agentguard',
   '/config',
+  '/config?tab=samantha',
 ] as const;
 
 /** Coerce model tool args (e.g. path="catalog") into an app route — not user-utterance parsing. */
 export function coerceSellerNavPath(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  let base = (trimmed.startsWith('/') ? trimmed : `/${trimmed}`).split('?')[0];
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const queryIndex = withSlash.indexOf('?');
+  const pathPart = queryIndex >= 0 ? withSlash.slice(0, queryIndex) : withSlash;
+  const queryPart = queryIndex >= 0 ? withSlash.slice(queryIndex + 1) : '';
+  let base = pathPart;
   if (base.length > 1) base = base.replace(/\/+$/, '');
-  if ((SELLER_NAV_ALLOWLIST as readonly string[]).includes(base)) return base;
-  if (base.startsWith('/catalog/') || base.startsWith('/orders/')) return base;
+  const withQuery = (path: string) => (queryPart ? `${path}?${queryPart}` : path);
+  if ((SELLER_NAV_ALLOWLIST as readonly string[]).includes(withSlash)) return withSlash;
+  if ((SELLER_NAV_ALLOWLIST as readonly string[]).includes(base)) return withQuery(base);
+  if (base.startsWith('/catalog/') || base.startsWith('/orders/')) return withQuery(base);
 
   const label = trimmed.toLowerCase().replace(/^the\s+/, '').replace(/\s+page$/, '');
   const soft: Record<string, string> = {
@@ -112,8 +119,15 @@ export function coerceSellerNavPath(raw: string): string | null {
     'new catalog': '/catalog/new',
     orders: '/orders',
     order: '/orders',
-    agentguard: '/agentguard',
-    mandate: '/agentguard',
+    agentguard: '/config?tab=agent-guard',
+    mandate: '/config?tab=agent-guard',
+    samantha: '/config?tab=samantha',
+    memory: '/config?tab=samantha',
+    'memory settings': '/config?tab=samantha',
+    preferences: '/config',
+    profile: '/config?tab=profile',
+    activity: '/config?tab=activity',
+    network: '/config?tab=network',
     config: '/config',
     settings: '/config',
     dashboard: '/dashboard',
@@ -127,7 +141,7 @@ export const SELLER_TOOL_DEFINITIONS = [
     type: 'function' as const,
     name: 'navigate_to',
     description:
-      'Short tool: navigate Seller UI to an allowlisted path (/catalog, /catalog/new, /orders, /agentguard, /config, /dashboard).',
+      'Short tool: navigate Seller UI to an allowlisted destination, including Samantha memory settings at /config?tab=samantha.',
     parameters: {
       type: 'object',
       properties: {
@@ -185,33 +199,33 @@ export const SELLER_TOOL_DEFINITIONS = [
     type: 'function' as const,
     name: 'accept_order',
     description:
-      'Accept one paid Seller order through AgentGuard and open its order page. Omit order_id to use the newest paid order.',
+      'Accept one paid Seller order through AgentGuard and open its order page. Requires the exact order_id returned by list_pending_orders.',
     parameters: {
       type: 'object',
       properties: { order_id: { type: 'string' } },
-      required: [],
+      required: ['order_id'],
     },
   },
   {
     type: 'function' as const,
     name: 'reject_order',
     description:
-      'Reject one paid Seller order through AgentGuard and open its order page. Omit order_id to use the newest paid order.',
+      'Reject one paid Seller order through AgentGuard and open its order page. Requires the exact order_id returned by list_pending_orders.',
     parameters: {
       type: 'object',
       properties: { order_id: { type: 'string' } },
-      required: [],
+      required: ['order_id'],
     },
   },
   {
     type: 'function' as const,
     name: 'mark_order_fulfilled',
     description:
-      'Mark one accepted Seller order fulfilled through AgentGuard and open its order page. Omit order_id to use the newest accepted order.',
+      'Mark one accepted Seller order fulfilled through AgentGuard and open its order page. Requires the exact order_id returned by list_pending_orders.',
     parameters: {
       type: 'object',
       properties: { order_id: { type: 'string' } },
-      required: [],
+      required: ['order_id'],
     },
   },
   {
@@ -530,31 +544,12 @@ export async function runSellerTool(
       reject_order: 'seller.order.reject',
       mark_order_fulfilled: 'seller.fulfilment.commit',
     } as const;
-    const eligibleStatus = name === 'mark_order_fulfilled' ? 'accepted' : 'created';
-    let orderId = String(args.order_id ?? '').trim();
-    if (!orderId) {
-      try {
-        const orders = await listCommerceSellerOrders();
-        const latest = orders
-          .filter((order) => order.status === eligibleStatus)
-          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
-        orderId = latest?.id ?? '';
-      } catch (err) {
-        return {
-          ok: false,
-          tool: name,
-          message: err instanceof Error ? err.message : 'Could not load Seller orders.',
-        };
-      }
-    }
+    const orderId = String(args.order_id ?? '').trim();
     if (!orderId) {
       return {
         ok: false,
         tool: name,
-        message:
-          name === 'mark_order_fulfilled'
-            ? 'No accepted Seller order is ready to mark fulfilled.'
-            : 'No paid Seller order is available for that action.',
+        message: 'Choose an exact order before changing its status.',
         navigateTo: '/orders',
       };
     }
@@ -638,6 +633,8 @@ export async function runSellerTool(
     if (receiptId) outcomeQuery.set('receipt', receiptId);
     if (executed.approval?.approval_id) {
       outcomeQuery.set('approval', executed.approval.approval_id);
+      if (executed.decision_id) outcomeQuery.set('decision', executed.decision_id);
+      if (executed.correlation_id) outcomeQuery.set('correlation', executed.correlation_id);
       outcomeQuery.set('amount', String(amountInr));
       outcomeQuery.set('resource', orderId);
     }
@@ -653,7 +650,7 @@ export async function runSellerTool(
       decision,
       receiptId,
       data: executed as unknown as Record<string, unknown>,
-      navigateTo: `/agentguard?${outcomeQuery.toString()}`,
+      navigateTo: `/config?tab=agent-guard&${outcomeQuery.toString()}`,
     };
   } catch (err) {
     return {

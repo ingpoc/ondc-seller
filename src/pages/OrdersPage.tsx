@@ -56,6 +56,35 @@ const filterOptions: StatusFilter[] = [
   'cancelled',
 ];
 
+export function OrderFilterButton({
+  filter,
+  count,
+  active,
+  onSelect,
+}: {
+  filter: StatusFilter;
+  count: number;
+  active: boolean;
+  onSelect?: (filter: StatusFilter) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onSelect?.(filter)}
+      className={cn(
+        'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors',
+        active
+          ? 'bg-primary text-primary-foreground shadow-sm'
+          : 'bg-secondary text-secondary-foreground hover:bg-muted'
+      )}
+    >
+      {filter}
+      <span className="ml-2 text-xs opacity-80">{count}</span>
+    </button>
+  );
+}
+
 const statusLabels: Record<UCPOrderStatus, string> = {
   created: 'Pending',
   accepted: 'Accepted',
@@ -394,20 +423,13 @@ export function OrdersPage() {
               const active = filter === filterOption;
 
               return (
-                <button
+                <OrderFilterButton
                   key={filterOption}
-                  type="button"
-                  onClick={() => setFilter(filterOption)}
-                  className={cn(
-                    'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors',
-                    active
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'bg-secondary text-secondary-foreground hover:bg-muted'
-                  )}
-                >
-                  {filterOption}
-                  <span className="ml-2 text-xs opacity-80">{count}</span>
-                </button>
+                  filter={filterOption}
+                  count={count}
+                  active={active}
+                  onSelect={setFilter}
+                />
               );
             })}
           </div>

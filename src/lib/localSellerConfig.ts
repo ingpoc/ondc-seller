@@ -3,7 +3,7 @@ import { assertSellerActionAllowed, canExecuteSellerAction } from './sellerActio
 
 const LOCAL_CONFIG_STORAGE_KEY = 'ondc-seller-local-config';
 const VERIFIED_CONFIG_MESSAGE =
-  'Verified seller trust is required before changing payout or seller configuration.';
+  'Verified seller trust is required before changing seller network configuration.';
 
 export interface SellerClientConfig {
   baseUrl: string;

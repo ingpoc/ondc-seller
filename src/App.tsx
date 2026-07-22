@@ -48,8 +48,8 @@ const PRIMARY_NAV_ITEMS: NavItem[] = [
 ];
 
 const ACCOUNT_ASSISTANT_ITEM: NavItem = {
-  href: '/agentguard',
-  label: 'Assistant permissions',
+  href: '/config?tab=agent-guard',
+  label: 'Agent Guard',
 };
 
 type HeaderControl = 'search' | 'account' | null;
@@ -150,7 +150,7 @@ export function getRuntimeMeta({
 
   return {
     label: 'Unavailable',
-    detail: 'The seller assistant is not ready. Open Settings to review the connection.',
+    detail: 'The seller assistant is not ready. Open Settings → Agent Guard to review permissions.',
     className: 'bg-accent text-accent-foreground',
     icon: Bot,
   };
@@ -294,7 +294,7 @@ function HeaderAttentionBadge() {
   if (trustOk && runtimeOk) return null;
 
   const preferTrust = !trustOk;
-  const href = preferTrust ? '/config' : '/agentguard';
+  const href = preferTrust ? '/config?tab=network' : '/config?tab=agent-guard';
   const label = preferTrust ? `Identity: ${trustMeta.label}` : `Assistant: ${runtimeMeta.label}`;
   const Icon = preferTrust ? trustMeta.icon : runtimeMeta.icon;
   const detail = preferTrust ? trustMeta.detail : runtimeMeta.detail;
@@ -388,6 +388,17 @@ function AccountMenu({
             </Link>
             <Link
               role="menuitem"
+              to="/config?tab=samantha"
+              className="rounded-xl px-3 py-2 text-sm hover:bg-secondary"
+              onClick={() => {
+                onOpenChange(false);
+                onNavigate?.();
+              }}
+            >
+              Samantha
+            </Link>
+            <Link
+              role="menuitem"
               to="/config"
               className="rounded-xl px-3 py-2 text-sm hover:bg-secondary"
               onClick={() => {
@@ -450,6 +461,8 @@ function AccountPanelCompact({
         label={ACCOUNT_ASSISTANT_ITEM.label}
         onNavigate={onNavigate}
       />
+      <NavigationLink href="/config?tab=samantha" label="Samantha" onNavigate={onNavigate} />
+      <NavigationLink href="/config" label="Settings" onNavigate={onNavigate} />
       <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={onLogout}>
         Sign out
       </Button>

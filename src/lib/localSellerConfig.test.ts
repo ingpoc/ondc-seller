@@ -23,7 +23,7 @@ describe('localSellerConfig trust policy', () => {
     window.localStorage.clear();
   });
 
-  it('allows payout and seller configuration changes only for verified trust', () => {
+  it('allows seller network configuration changes only for verified trust', () => {
     const states: PortfolioTrustState[] = [
       'no_identity',
       'identity_present_unverified',
@@ -43,7 +43,7 @@ describe('localSellerConfig trust policy', () => {
 
   it('blocks local seller configuration persistence when trust is not verified', () => {
     expect(() => saveVerifiedLocalSellerConfig(validConfig, 'manual_review')).toThrow(
-      'Verified seller trust is required before changing payout or seller configuration.',
+      'Verified seller trust is required before changing seller network configuration.',
     );
 
     expect(readLocalSellerConfig()).toBeNull();

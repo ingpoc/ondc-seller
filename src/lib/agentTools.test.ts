@@ -29,8 +29,20 @@ describe('seller agent tools', () => {
     expect(coerceSellerNavPath('catalog')).toBe('/catalog');
     expect(coerceSellerNavPath('/catalog')).toBe('/catalog');
     expect(coerceSellerNavPath('orders')).toBe('/orders');
+    expect(coerceSellerNavPath('memory settings')).toBe('/config?tab=samantha');
+    expect(coerceSellerNavPath('/config?tab=samantha')).toBe('/config?tab=samantha');
     expect(coerceSellerNavPath('agent')).toBeNull();
     expect(coerceSellerNavPath('/agent')).toBeNull();
+  });
+
+  it('navigate_to opens Samantha memory settings', async () => {
+    const result = await runSellerTool(
+      'navigate_to',
+      { path: '/config?tab=samantha' },
+      { subjectId: 'principal:demo:s' },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.navigateTo).toBe('/config?tab=samantha');
   });
 
   it('navigate_to coerces bare catalog to /catalog', async () => {
@@ -212,20 +224,18 @@ describe('seller agent tools', () => {
     );
   });
 
-  it('accept_order resolves the newest paid order and executes through AgentGuard', async () => {
-    const { listCommerceSellerOrders } = await import('./commerceClient');
+  it('accept_order executes the exact selected order through AgentGuard', async () => {
     const { executeProtectedAction } = await import('./agentGuardClient');
-    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
-      { id: 'older-paid', status: 'created', updatedAt: '2026-07-12T10:00:00Z' },
-      { id: 'newer-paid', status: 'created', updatedAt: '2026-07-14T10:00:00Z' },
-      { id: 'already-accepted', status: 'accepted', updatedAt: '2026-07-15T10:00:00Z' },
-    ] as never);
     vi.mocked(executeProtectedAction).mockResolvedValueOnce({
       decision: 'allow',
       receipt: { receipt_id: 'rcpt_accept' } as never,
     });
 
-    const result = await runSellerTool('accept_order', {}, { subjectId: 'principal:demo:s' });
+    const result = await runSellerTool(
+      'accept_order',
+      { order_id: 'newer-paid' },
+      { subjectId: 'principal:demo:s' },
+    );
 
     expect(result.ok).toBe(true);
     expect(result.navigateTo).toBe('/orders/newer-paid');
@@ -258,13 +268,8 @@ describe('seller agent tools', () => {
     );
   });
 
-  it('mark_order_fulfilled resolves the newest accepted order', async () => {
-    const { listCommerceSellerOrders } = await import('./commerceClient');
+  it('mark_order_fulfilled executes the exact selected order', async () => {
     const { executeProtectedAction } = await import('./agentGuardClient');
-    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
-      { id: 'paid', status: 'created', updatedAt: '2026-07-15T12:00:00Z' },
-      { id: 'accepted', status: 'accepted', updatedAt: '2026-07-15T11:00:00Z' },
-    ] as never);
     vi.mocked(executeProtectedAction).mockResolvedValueOnce({
       decision: 'allow',
       receipt: { receipt_id: 'rcpt_fulfilled' } as never,
@@ -272,7 +277,7 @@ describe('seller agent tools', () => {
 
     const result = await runSellerTool(
       'mark_order_fulfilled',
-      {},
+      { order_id: 'accepted' },
       { subjectId: 'principal:demo:s' },
     );
 
@@ -286,12 +291,7 @@ describe('seller agent tools', () => {
     );
   });
 
-  it('order actions fail clearly when no eligible order exists', async () => {
-    const { listCommerceSellerOrders } = await import('./commerceClient');
-    vi.mocked(listCommerceSellerOrders).mockResolvedValueOnce([
-      { id: 'already-done', status: 'delivered', updatedAt: '2026-07-15T10:00:00Z' },
-    ] as never);
-
+  it('order actions fail closed without an exact order id', async () => {
     const result = await runSellerTool(
       'mark_order_fulfilled',
       {},
@@ -299,7 +299,7 @@ describe('seller agent tools', () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.message).toMatch(/no accepted seller order/i);
+    expect(result.message).toMatch(/choose an exact order/i);
     expect(result.navigateTo).toBe('/orders');
   });
 

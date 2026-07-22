@@ -135,21 +135,31 @@ export async function executeProtectedAction(params: {
   action: AgentGuardAction;
   amountInr: number;
   resourceId: string;
+  decisionId?: string;
   approvalId?: string;
   idempotencyKey?: string;
+  correlationId?: string;
   payload?: Record<string, unknown>;
 }) {
+  const effectiveIdempotencyKey = params.idempotencyKey
+    || `seller-action:${params.action}:${params.resourceId}:${params.amountInr}`;
+  const correlationId = params.correlationId || `seller-protected:${effectiveIdempotencyKey}`;
   const response = await fetch(`${TRUST_API_URL}/api/agentguard/actions/execute`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': effectiveIdempotencyKey,
+      'X-Correlation-ID': correlationId,
+    },
     body: JSON.stringify({
       ...walletField(params.walletAddress),
       action: params.action,
       amount_inr: params.amountInr,
       resource_id: params.resourceId,
+      decision_id: params.decisionId,
       approval_id: params.approvalId,
-      idempotency_key: params.idempotencyKey,
+      idempotency_key: effectiveIdempotencyKey,
       payload: params.payload ?? {},
     }),
   });
@@ -159,6 +169,8 @@ export async function executeProtectedAction(params: {
   }
   const data = await parseApi<{
     decision?: string;
+    decision_id?: string;
+    correlation_id?: string;
     receipt?: IntentReceipt;
     result?: Record<string, unknown>;
     execution?: Record<string, unknown>;

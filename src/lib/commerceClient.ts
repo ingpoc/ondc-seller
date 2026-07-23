@@ -117,10 +117,18 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     (refundStatus === 'succeeded' || refundStatus === 'refunded') &&
     Number(order.refunded_amount_inr || 0) >= Number(order.amount_inr || 0);
   const statusByCommerceStatus: Record<string, UCPOrderStatus> = {
+    prepared: 'created',
+    payment_pending: 'created',
+    payment_unknown: 'created',
     paid: 'created',
+    confirmed: 'accepted',
     accepted: 'accepted',
+    preparing: 'in_progress',
+    shipped: 'shipped',
     fulfilled: 'delivered',
+    delivered: 'delivered',
     closed: 'delivered',
+    payment_failed: 'cancelled',
     rejected: 'cancelled',
     cancelled: 'cancelled',
     unknown: 'created',

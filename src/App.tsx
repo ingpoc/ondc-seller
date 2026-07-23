@@ -627,7 +627,17 @@ function HeaderBar() {
                   <Menu className="size-4" />
                 </Button>
               </SheetTrigger>
-              <SheetContent id="seller-navigation" side="right" className="w-[20rem]">
+              <SheetContent
+                id="seller-navigation"
+                side="right"
+                className="w-[20rem]"
+                onEscapeKeyDown={(event) => {
+                  // HeaderSearch owns Escape on desktop. Make the mobile sheet's
+                  // close contract explicit when that focused input receives it.
+                  event.preventDefault();
+                  setMobileOpen(false);
+                }}
+              >
                 <SheetHeader>
                   <SheetTitle>Seller navigation</SheetTitle>
                   <SheetDescription>

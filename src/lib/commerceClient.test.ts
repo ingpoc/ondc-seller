@@ -46,6 +46,28 @@ describe('mapDemoItemToCatalogItem', () => {
 });
 
 describe('mapDemoOrderToSellerOrder', () => {
+  it('maps every gateway fulfilment vocabulary to the Seller lifecycle', () => {
+    const base = {
+      order_id: 'order-state',
+      transaction_id: 'txn-state',
+      message_id: 'msg-state',
+      buyer_id: 'buyer-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_version: 1,
+      quantity: 1,
+      amount_inr: 50,
+      created_at: '2026-07-23T00:00:00Z',
+      updated_at: '2026-07-23T00:00:00Z',
+    };
+
+    expect(mapDemoOrderToSellerOrder({ ...base, status: 'confirmed' }).status).toBe('accepted');
+    expect(mapDemoOrderToSellerOrder({ ...base, status: 'preparing' }).status).toBe('in_progress');
+    expect(mapDemoOrderToSellerOrder({ ...base, status: 'shipped' }).status).toBe('shipped');
+    expect(mapDemoOrderToSellerOrder({ ...base, status: 'delivered' }).status).toBe('delivered');
+    expect(mapDemoOrderToSellerOrder({ ...base, status: 'payment_failed' }).status).toBe('cancelled');
+  });
+
   it('shows the product and supplied delivery address without invented placeholders', () => {
     const mapped = mapDemoOrderToSellerOrder({
       order_id: 'order-1',

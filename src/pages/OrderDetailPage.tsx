@@ -700,6 +700,11 @@ export function OrderDetailPage() {
               <p className="text-sm text-muted-foreground">
                 {order.fulfillment?.tracking?.statusMessage || 'No tracking update yet.'}
               </p>
+              {order.fulfillment?.tracking?.id ? (
+                <p className="text-sm text-muted-foreground">
+                  Tracking ID: <span className="font-mono">{order.fulfillment.tracking.id}</span>
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1">
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -959,7 +964,14 @@ export function OrderDetailPage() {
           {lastReceipt ? (
             <p className="text-sm text-muted-foreground" data-testid="agentguard-last-receipt">
               Last authorization reference: {customerReference(lastReceipt.receipt_id)} ·{' '}
-              {lastReceipt.outcome} · INR {lastReceipt.amount_inr}
+              {lastReceipt.outcome} · INR{' '}
+              {Number(
+                lastReceipt.amount_inr
+                  ?? (lastReceipt as IntentReceipt & {
+                    bound_action?: { amount_inr?: number };
+                  }).bound_action?.amount_inr
+                  ?? 0
+              )}
             </p>
           ) : null}
         </CardContent>

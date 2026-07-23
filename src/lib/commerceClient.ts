@@ -32,6 +32,19 @@ export interface DemoCommerceOrder {
   quantity: number;
   amount_inr: number;
   status: string;
+  version?: number;
+  fulfilment?: {
+    status?: string;
+    tracking_id?: string;
+    provider_name?: string;
+    status_message?: string;
+    history?: Array<{
+      status: string;
+      recorded_at: string;
+      tracking_id?: string;
+      status_message?: string;
+    }>;
+  };
   refunded_amount_inr?: number;
   refund_status?: string;
   payment?: {
@@ -49,6 +62,23 @@ export type SellerCommerceOrder = UCPOrder & {
   refundStatus?: string;
   paymentStatus?: string;
 };
+
+export interface SellerCommerceIssue {
+  issue_id: string;
+  order_id: string;
+  status: string;
+  version: number;
+  reason: string;
+  description: string;
+  response?: string;
+  remedy?: {
+    type?: string;
+    amount_inr?: number;
+    message?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
 
 export function paymentStatusLabel(status?: string): string {
   const normalized = String(status || '').trim().toLowerCase();
@@ -166,10 +196,22 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     deliveryAddress: delivery,
     fulfillment: {
       type: 'delivery',
-      status: status === 'delivered' ? 'delivered' : status === 'cancelled' ? 'cancelled' : 'pending',
+      providerName: order.fulfilment?.provider_name,
+      status:
+        status === 'delivered'
+          ? 'delivered'
+          : status === 'cancelled'
+            ? 'cancelled'
+            : status === 'shipped'
+              ? 'in_transit'
+              : status === 'in_progress'
+                ? 'pending'
+                : 'pending',
       tracking: {
-        status,
-        statusMessage: 'Order received through the commerce exchange.',
+        id: order.fulfilment?.tracking_id,
+        status: order.fulfilment?.status || status,
+        statusMessage:
+          order.fulfilment?.status_message || 'Order received through the commerce exchange.',
       },
     },
     refundedAmountInr: order.refunded_amount_inr ?? 0,
@@ -238,4 +280,13 @@ export async function listCommerceSellerOrders() {
 export async function getCommerceOrder(orderId: string) {
   const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/seller/orders/${orderId}`);
   return mapDemoOrderToSellerOrder(data.order);
+}
+
+export async function listCommerceSellerIssues(orderId?: string) {
+  const data = await demoFetch<{ issues: SellerCommerceIssue[]; count: number }>(
+    '/api/demo-commerce/seller/issues',
+  );
+  return orderId
+    ? data.issues.filter((issue) => issue.order_id === orderId)
+    : data.issues;
 }

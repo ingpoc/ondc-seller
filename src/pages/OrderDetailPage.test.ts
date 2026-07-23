@@ -94,9 +94,11 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
       expect(canMutateSellerOrder('accepted', 'reject')).toBe(false);
     });
 
-    it('requires verified trust before dispatching accepted or packed orders', () => {
-      expect(canMutateSellerOrder('accepted', 'dispatch')).toBe(true);
-      expect(canMutateSellerOrder('packed', 'dispatch')).toBe(true);
+    it('requires the frozen prepare edge before dispatch and completion', () => {
+      expect(canMutateSellerOrder('accepted', 'prepare')).toBe(true);
+      expect(canMutateSellerOrder('accepted', 'dispatch')).toBe(false);
+      expect(canMutateSellerOrder('in_progress', 'dispatch')).toBe(true);
+      expect(canMutateSellerOrder('shipped', 'complete')).toBe(true);
       expect(canMutateSellerOrder('created', 'dispatch')).toBe(false);
     });
   });

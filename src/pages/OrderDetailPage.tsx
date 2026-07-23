@@ -24,7 +24,9 @@ import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/
 import { listSellerOrderNotesForOrder } from '../lib/localSellerNotes';
 import {
   getCommerceOrder,
+  listCommerceSellerIssues,
   paymentStatusLabel,
+  type SellerCommerceIssue,
   type SellerCommerceOrder,
 } from '../lib/commerceClient';
 import { customerReference } from '../lib/displayText';
@@ -36,9 +38,10 @@ import {
 } from '@aadharchain/agentguard-contract';
 const canAcceptOrder = (status: UCPOrderStatus): boolean => status === 'created';
 const canRejectOrder = (status: UCPOrderStatus): boolean => status === 'created';
-const canDispatchOrder = (status: UCPOrderStatus): boolean =>
-  ['accepted', 'packed'].includes(status);
-type SellerOrderMutation = 'accept' | 'reject' | 'dispatch';
+const canPrepareOrder = (status: UCPOrderStatus): boolean => status === 'accepted';
+const canDispatchOrder = (status: UCPOrderStatus): boolean => status === 'in_progress';
+const canCompleteOrder = (status: UCPOrderStatus): boolean => status === 'shipped';
+type SellerOrderMutation = 'accept' | 'reject' | 'prepare' | 'dispatch' | 'complete';
 
 export function normalizeTrackingId(value: string): string | null {
   const normalized = value.trim();
@@ -51,7 +54,9 @@ export function canMutateSellerOrder(
 ): boolean {
   if (mutation === 'accept') return canAcceptOrder(status);
   if (mutation === 'reject') return canRejectOrder(status);
-  return canDispatchOrder(status);
+  if (mutation === 'prepare') return canPrepareOrder(status);
+  if (mutation === 'dispatch') return canDispatchOrder(status);
+  return canCompleteOrder(status);
 }
 
 export function sellerRefundTrustSatisfied(
@@ -174,6 +179,8 @@ export function OrderDetailPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
   const [trackingId, setTrackingId] = useState('');
+  const [issues, setIssues] = useState<SellerCommerceIssue[]>([]);
+  const [remedyMessage, setRemedyMessage] = useState('');
   const [pendingApproval, setPendingApproval] = useState<Approval | null>(null);
   const [refundConfirmation, setRefundConfirmation] = useState<number | null>(null);
   const [lastReceipt, setLastReceipt] = useState<IntentReceipt | null>(null);
@@ -194,6 +201,7 @@ export function OrderDetailPage() {
         // the only fallback; browser fixtures cannot become order authority.
         try {
           setOrder(await getCommerceOrder(id));
+          setIssues(await listCommerceSellerIssues(id));
           return;
         } catch (commerceError) {
           if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
@@ -353,8 +361,10 @@ export function OrderDetailPage() {
         idempotencyKey: `seller.fulfilment.commit:${id}`,
         payload: {
           order_id: id,
+          status: 'shipped',
           tracking_id: normalizedTrackingId,
           provider_name: 'Standard Courier',
+          status_message: 'The seller dispatched this order to the courier.',
         },
       });
       if (!executed.execution) {
@@ -378,6 +388,73 @@ export function OrderDetailPage() {
       setTrackingId('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch order');
+    } finally {
+      setProcessing(null);
+    }
+  }
+
+  async function handleFulfilmentStep(
+    mutation: 'prepare' | 'complete',
+    targetStatus: 'preparing' | 'delivered',
+  ) {
+    if (!order || !id || !canMutateSellerOrder(order.status, mutation)) return;
+    setProcessing(mutation);
+    setError(null);
+    try {
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: 'seller.fulfilment.commit',
+        amountInr: 0,
+        resourceId: id,
+        idempotencyKey: `seller.fulfilment.commit:${id}:${targetStatus}`,
+        payload: {
+          order_id: id,
+          status: targetStatus,
+          status_message:
+            targetStatus === 'preparing'
+              ? 'The seller is preparing this order.'
+              : 'The seller confirmed delivery completion.',
+        },
+      });
+      if (!executed.execution) {
+        throw new Error('Fulfilment update was denied by AgentGuard.');
+      }
+      setOrder(await getCommerceOrder(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update fulfilment');
+    } finally {
+      setProcessing(null);
+    }
+  }
+
+  async function handlePromiseRemedy(issue: SellerCommerceIssue) {
+    setProcessing(`remedy-${issue.issue_id}`);
+    setError(null);
+    try {
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: 'seller.remedy.promise',
+        amountInr: 0,
+        resourceId: issue.issue_id,
+        idempotencyKey: `seller.remedy.promise:${issue.issue_id}`,
+        payload: {
+          issue_id: issue.issue_id,
+          type: 'service_recovery',
+          message: remedyMessage.trim() || 'We will resolve this issue with the buyer.',
+        },
+      });
+      if (!executed.execution || !executed.receipt) {
+        throw new Error('The protected remedy was not completed.');
+      }
+      const verification = await verifyReceipt({ receipt: executed.receipt });
+      if (!verification.valid) {
+        throw new Error('The remedy receipt could not be verified.');
+      }
+      setLastReceipt(executed.receipt);
+      setIssues(await listCommerceSellerIssues(id));
+      setRemedyMessage('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to promise remedy');
     } finally {
       setProcessing(null);
     }
@@ -665,6 +742,14 @@ export function OrderDetailPage() {
             {processing === 'reject' ? 'Processing…' : 'Review rejection'}
           </Button>
         ) : null}
+        {canPrepareOrder(order.status) ? (
+          <Button
+            disabled={processing === 'prepare' || trust.loading}
+            onClick={() => void handleFulfilmentStep('prepare', 'preparing')}
+          >
+            {processing === 'prepare' ? 'Preparing…' : 'Start preparing'}
+          </Button>
+        ) : null}
         {canDispatchOrder(order.status) ? (
           <Dialog
             open={dispatchDialogOpen}
@@ -735,7 +820,65 @@ export function OrderDetailPage() {
             </DialogContent>
           </Dialog>
         ) : null}
+        {canCompleteOrder(order.status) ? (
+          <Button
+            disabled={processing === 'complete' || trust.loading}
+            onClick={() => void handleFulfilmentStep('complete', 'delivered')}
+          >
+            {processing === 'complete' ? 'Completing…' : 'Complete delivery'}
+          </Button>
+        ) : null}
       </div>
+
+      <Card data-testid="seller-remedy-panel">
+        <CardHeader>
+          <CardTitle>Buyer issues and protected remedies</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {issues.length ? (
+            issues.map((issue) => (
+              <div
+                key={issue.issue_id}
+                className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">{issue.reason}</div>
+                    <p className="text-sm text-muted-foreground">{issue.description}</p>
+                  </div>
+                  <Badge variant="secondary">{issue.status}</Badge>
+                </div>
+                {issue.remedy ? (
+                  <p className="text-sm text-muted-foreground">
+                    Promised remedy: {issue.remedy.message || issue.remedy.type || 'Recorded'}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <Input
+                      value={remedyMessage}
+                      onChange={(event) => setRemedyMessage(event.target.value)}
+                      placeholder="Describe the remedy promised to the buyer"
+                      aria-label="Remedy promise"
+                    />
+                    <Button
+                      onClick={() => void handlePromiseRemedy(issue)}
+                      disabled={processing === `remedy-${issue.issue_id}`}
+                    >
+                      {processing === `remedy-${issue.issue_id}`
+                        ? 'Recording…'
+                        : 'Promise protected remedy'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No buyer issues are open for this order.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card data-testid="agentguard-refund-panel">
         <CardHeader>

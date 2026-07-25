@@ -33,6 +33,9 @@ const SELLER_ORB_INSTRUCTIONS =
 export const SAMANTHA_EXECUTION_BOUNDARY =
   'Samantha can answer questions and carry out enabled store actions. AgentGuard checks every protected action; anything outside your limits stops for approval or is denied.';
 export const SAMANTHA_SETTINGS_PATH = '/config?tab=samantha';
+export const SAMANTHA_CONNECTION_TIMEOUT_MS = 8_000;
+export const SAMANTHA_CONNECTION_TIMEOUT_HINT =
+  'Samantha could not connect within 8 seconds. Check your connection, then retry.';
 
 export function groundedSellerToolReply(
   results: Array<Pick<SellerToolResult, 'ok' | 'message'>>,
@@ -114,6 +117,7 @@ export function SamanthaOrb() {
   const transcriptSessionIdRef = useRef(createSamanthaSessionId('seller'));
   const lastPersistedReplyRef = useRef('');
   const startInFlightRef = useRef(false);
+  const connectionAttemptRef = useRef(0);
   /** Queued while connecting — flushed when Realtime is listening. */
   const pendingTextRef = useRef<string | null>(null);
   const textInputRef = useRef<HTMLInputElement | null>(null);
@@ -311,6 +315,7 @@ export function SamanthaOrb() {
   );
 
   function stopSession() {
+    connectionAttemptRef.current += 1;
     const pc = pcRef.current;
     pcRef.current = null;
     dcRef.current = null;
@@ -542,19 +547,41 @@ export function SamanthaOrb() {
   async function startSession() {
     if (startInFlightRef.current || state === 'listening' || state === 'connecting') return;
     startInFlightRef.current = true;
+    const attempt = ++connectionAttemptRef.current;
+    let timeoutId: number | undefined;
     try {
-      await startSessionConnection();
+      await Promise.race([
+        startSessionConnection(attempt),
+        new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(
+            () => reject(new Error('samantha_connection_timeout')),
+            SAMANTHA_CONNECTION_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (error) {
+      if (connectionAttemptRef.current !== attempt) return;
+      stopSession();
+      setState('error');
+      setHint(
+        error instanceof Error && error.message === 'samantha_connection_timeout'
+          ? SAMANTHA_CONNECTION_TIMEOUT_HINT
+          : 'Samantha could not connect. Check your connection, then retry.',
+      );
     } finally {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
       startInFlightRef.current = false;
     }
   }
 
-  async function startSessionConnection() {
+  async function startSessionConnection(attempt: number) {
+    const isCurrentAttempt = () => connectionAttemptRef.current === attempt;
     setState('connecting');
     setHint('Connecting Samantha…');
     // Re-probe on open: avoids false "not configured" while status is still loading
     // or after a Free-tier cold start failed the mount-time fetch.
     const ready = configured === true ? true : await probeRealtimeConfigured();
+    if (!isCurrentAttempt()) return;
     if (!ready) {
       setState('error');
       setHint('Realtime not configured on gateway');
@@ -581,7 +608,9 @@ export function SamanthaOrb() {
         memory_prompt: formatMemoryForPrompt(memory),
       }),
     });
+    if (!isCurrentAttempt()) return;
     const secretBody = await secretRes.json();
+    if (!isCurrentAttempt()) return;
     if (!secretRes.ok || secretBody.success === false) {
       setState('error');
       setHint(String(secretBody.detail || 'Failed to start Samantha'));
@@ -767,6 +796,15 @@ export function SamanthaOrb() {
             {SAMANTHA_EXECUTION_BOUNDARY}
           </p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>
+          {state === 'error' ? (
+            <button
+              type="button"
+              className="mt-2 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => void startSession()}
+            >
+              Retry connection
+            </button>
+          ) : null}
           <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span role="status">
               {microphoneState === 'on'

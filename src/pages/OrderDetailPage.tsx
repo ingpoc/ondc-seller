@@ -974,6 +974,21 @@ export function OrderDetailPage() {
               )}
             </p>
           ) : null}
+          {!lastReceipt && order.refundAuthorization ? (
+            <div
+              className="space-y-1 rounded-xl border border-border/70 bg-muted/40 p-3 text-sm text-foreground"
+              data-testid="agentguard-durable-refund-receipt"
+            >
+              <p className="font-medium">
+                Refund authorization reference:{' '}
+                {customerReference(order.refundAuthorization.receiptId)} · verified · INR{' '}
+                {order.refundAuthorization.amountInr.toLocaleString('en-IN')}
+              </p>
+              <p className="break-all text-xs text-muted-foreground">
+                Signed AgentGuard receipt ID: {order.refundAuthorization.receiptId}
+              </p>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

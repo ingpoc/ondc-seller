@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  SAMANTHA_CONNECTION_TIMEOUT_HINT,
+  SAMANTHA_CONNECTION_TIMEOUT_MS,
   SAMANTHA_EXECUTION_BOUNDARY,
   SAMANTHA_SETTINGS_PATH,
   groundedSellerToolReply,
@@ -20,6 +22,12 @@ describe('Samantha execution-boundary copy', () => {
 
   it('opens the Samantha memory settings rather than the generic authority tab', () => {
     expect(SAMANTHA_SETTINGS_PATH).toBe('/config?tab=samantha');
+  });
+
+  it('fails a stalled connection into a clear retry state', () => {
+    expect(SAMANTHA_CONNECTION_TIMEOUT_MS).toBe(8_000);
+    expect(SAMANTHA_CONNECTION_TIMEOUT_HINT).toContain('within 8 seconds');
+    expect(SAMANTHA_CONNECTION_TIMEOUT_HINT).toContain('retry');
   });
 
   it('grounds multi-tool replies in the actual tool outcomes', () => {

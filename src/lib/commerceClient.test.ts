@@ -134,6 +134,12 @@ describe('mapDemoOrderToSellerOrder', () => {
       status: 'paid',
       refunded_amount_inr: 89,
       refund_status: 'succeeded',
+      refund_authorization: {
+        receipt_id: 'receipt_refund_123',
+        outcome: 'succeeded',
+        amount_inr: 89,
+        recorded_at: '2026-07-25T16:00:00Z',
+      },
       payment: { status: 'succeeded' },
       created_at: '2026-07-16T12:00:00Z',
       updated_at: '2026-07-16T12:00:00Z',
@@ -144,6 +150,12 @@ describe('mapDemoOrderToSellerOrder', () => {
     expect(mapped.refundedAmountInr).toBe(89);
     expect(mapped.refundStatus).toBe('refunded');
     expect(paymentStatusLabel(mapped.paymentStatus)).toBe('Refunded');
+    expect(mapped.refundAuthorization).toEqual({
+      receiptId: 'receipt_refund_123',
+      outcome: 'succeeded',
+      amountInr: 89,
+      recordedAt: '2026-07-25T16:00:00Z',
+    });
   });
 });
 

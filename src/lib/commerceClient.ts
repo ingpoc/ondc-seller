@@ -47,6 +47,12 @@ export interface DemoCommerceOrder {
   };
   refunded_amount_inr?: number;
   refund_status?: string;
+  refund_authorization?: {
+    receipt_id: string;
+    outcome?: string;
+    amount_inr?: number;
+    recorded_at?: string;
+  };
   payment?: {
     status?: string;
     amount_inr?: number;
@@ -61,6 +67,12 @@ export type SellerCommerceOrder = UCPOrder & {
   refundedAmountInr?: number;
   refundStatus?: string;
   paymentStatus?: string;
+  refundAuthorization?: {
+    receiptId: string;
+    outcome: string;
+    amountInr: number;
+    recordedAt?: string;
+  };
 };
 
 export interface SellerCommerceIssue {
@@ -216,6 +228,14 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     },
     refundedAmountInr: order.refunded_amount_inr ?? 0,
     refundStatus: fullyRefunded ? 'refunded' : order.refund_status,
+    refundAuthorization: order.refund_authorization
+      ? {
+          receiptId: order.refund_authorization.receipt_id,
+          outcome: order.refund_authorization.outcome || 'succeeded',
+          amountInr: Number(order.refund_authorization.amount_inr || 0),
+          recordedAt: order.refund_authorization.recorded_at,
+        }
+      : undefined,
     paymentStatus:
       (fullyRefunded ? 'refunded' : order.refund_status) ||
       (order.payment?.status === 'succeeded' || order.status === 'paid'

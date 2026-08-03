@@ -11,6 +11,8 @@ import {
   canMutateSellerOrder,
   fullRefundAmount,
   getOrderTimeline,
+  normalizeDeliveryProvider,
+  normalizeLogisticsTransactionId,
   normalizeTrackingId,
   OrderDetailPage,
   refundConfirmationCopy,
@@ -100,6 +102,15 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
       expect(canMutateSellerOrder('in_progress', 'dispatch')).toBe(true);
       expect(canMutateSellerOrder('shipped', 'complete')).toBe(true);
       expect(canMutateSellerOrder('created', 'dispatch')).toBe(false);
+    });
+
+    it('requires real provider and tracking values instead of a hardcoded courier', () => {
+      expect(normalizeDeliveryProvider('  Delhivery  ')).toBe('Delhivery');
+      expect(normalizeDeliveryProvider('   ')).toBeNull();
+      expect(normalizeTrackingId('  DL-123  ')).toBe('DL-123');
+      expect(normalizeTrackingId('   ')).toBeNull();
+      expect(normalizeLogisticsTransactionId('  txn-123  ')).toBe('txn-123');
+      expect(normalizeLogisticsTransactionId('   ')).toBeNull();
     });
   });
 

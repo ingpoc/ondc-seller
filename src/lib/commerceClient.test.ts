@@ -68,6 +68,59 @@ describe('mapDemoOrderToSellerOrder', () => {
     expect(mapDemoOrderToSellerOrder({ ...base, status: 'payment_failed' }).status).toBe('cancelled');
   });
 
+  it('projects only verified tracking links and the persisted fulfillment history', () => {
+    const base: DemoCommerceOrder = {
+      order_id: 'order-tracking',
+      transaction_id: 'txn-tracking',
+      message_id: 'msg-tracking',
+      buyer_id: 'buyer-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_version: 1,
+      quantity: 1,
+      amount_inr: 59,
+      status: 'shipped',
+      fulfilment: {
+        status: 'shipped',
+        provider_name: 'Lifecycle Logistics',
+        tracking_id: 'AWB-1',
+        tracking_url: 'https://logistics.example/track/AWB-1',
+        history: [
+          {
+            status: 'shipped',
+            recorded_at: '2026-08-02T01:00:00Z',
+            tracking_id: 'AWB-1',
+            status_message: 'Collected from seller',
+          },
+        ],
+      },
+      created_at: '2026-08-02T00:00:00Z',
+      updated_at: '2026-08-02T01:00:00Z',
+    };
+    const mapped = mapDemoOrderToSellerOrder(base);
+    expect(mapped.fulfillment).toMatchObject({
+      providerName: 'Lifecycle Logistics',
+      tracking: {
+        id: 'AWB-1',
+        url: 'https://logistics.example/track/AWB-1',
+      },
+      history: [
+        {
+          status: 'shipped',
+          recordedAt: '2026-08-02T01:00:00Z',
+          trackingId: 'AWB-1',
+          statusMessage: 'Collected from seller',
+        },
+      ],
+    });
+    expect(
+      mapDemoOrderToSellerOrder({
+        ...base,
+        fulfilment: { ...base.fulfilment, tracking_url: 'javascript:alert(1)' },
+      }).fulfillment?.tracking?.url,
+    ).toBeUndefined();
+  });
+
   it('shows the product and supplied delivery address without invented placeholders', () => {
     const mapped = mapDemoOrderToSellerOrder({
       order_id: 'order-1',

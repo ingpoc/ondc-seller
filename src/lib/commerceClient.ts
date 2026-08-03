@@ -36,6 +36,7 @@ export interface DemoCommerceOrder {
   fulfilment?: {
     status?: string;
     tracking_id?: string;
+    tracking_url?: string;
     provider_name?: string;
     status_message?: string;
     history?: Array<{
@@ -221,10 +222,19 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
                 : 'pending',
       tracking: {
         id: order.fulfilment?.tracking_id,
+        url: order.fulfilment?.tracking_url?.startsWith('https://')
+          ? order.fulfilment.tracking_url
+          : undefined,
         status: order.fulfilment?.status || status,
         statusMessage:
           order.fulfilment?.status_message || 'Order received through the commerce exchange.',
       },
+      history: order.fulfilment?.history?.map((event) => ({
+        status: event.status,
+        recordedAt: event.recorded_at,
+        trackingId: event.tracking_id,
+        statusMessage: event.status_message,
+      })),
     },
     refundedAmountInr: order.refunded_amount_inr ?? 0,
     refundStatus: fullyRefunded ? 'refunded' : order.refund_status,

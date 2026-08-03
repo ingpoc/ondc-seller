@@ -48,6 +48,16 @@ export function normalizeTrackingId(value: string): string | null {
   return normalized || null;
 }
 
+export function normalizeDeliveryProvider(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+export function normalizeLogisticsTransactionId(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
+
 export function canMutateSellerOrder(
   status: UCPOrderStatus,
   mutation: SellerOrderMutation
@@ -179,6 +189,8 @@ export function OrderDetailPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
   const [trackingId, setTrackingId] = useState('');
+  const [deliveryProvider, setDeliveryProvider] = useState('');
+  const [logisticsTransactionId, setLogisticsTransactionId] = useState('');
   const [issues, setIssues] = useState<SellerCommerceIssue[]>([]);
   const [remedyMessage, setRemedyMessage] = useState('');
   const [pendingApproval, setPendingApproval] = useState<Approval | null>(null);
@@ -330,7 +342,11 @@ export function OrderDetailPage() {
     }
   }
 
-  async function handleDispatch(requestedTrackingId: string) {
+  async function handleDispatch(
+    requestedTrackingId: string,
+    requestedProvider: string,
+    requestedLogisticsTransactionId: string
+  ) {
     if (!order || !id) return;
     if (!canMutateSellerOrder(order.status, 'dispatch')) {
       recordSellerActionAuditEvent({
@@ -350,6 +366,14 @@ export function OrderDetailPage() {
       setError('Enter a tracking ID before dispatching this order.');
       return;
     }
+    const normalizedProvider = normalizeDeliveryProvider(requestedProvider);
+    const normalizedLogisticsTransactionId = normalizeLogisticsTransactionId(
+      requestedLogisticsTransactionId
+    );
+    if (!normalizedProvider && !normalizedLogisticsTransactionId) {
+      setError('Enter the delivery provider or a signed LOG10 transaction before dispatching.');
+      return;
+    }
 
     setProcessing('dispatch');
     try {
@@ -363,7 +387,10 @@ export function OrderDetailPage() {
           order_id: id,
           status: 'shipped',
           tracking_id: normalizedTrackingId,
-          provider_name: 'Standard Courier',
+          ...(normalizedProvider ? { provider_name: normalizedProvider } : {}),
+          ...(normalizedLogisticsTransactionId
+            ? { logistics_transaction_id: normalizedLogisticsTransactionId }
+            : {}),
           status_message: 'The seller dispatched this order to the courier.',
         },
       });
@@ -386,6 +413,8 @@ export function OrderDetailPage() {
       setOrder(await getCommerceOrder(id));
       setDispatchDialogOpen(false);
       setTrackingId('');
+      setDeliveryProvider('');
+      setLogisticsTransactionId('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch order');
     } finally {
@@ -705,6 +734,31 @@ export function OrderDetailPage() {
                   Tracking ID: <span className="font-mono">{order.fulfillment.tracking.id}</span>
                 </p>
               ) : null}
+              {order.fulfillment?.tracking?.url ? (
+                <a
+                  className="inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  href={order.fulfillment.tracking.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open verified tracking
+                </a>
+              ) : null}
+              {order.fulfillment?.history?.length ? (
+                <ol className="mt-3 space-y-3 border-l border-border pl-4" data-testid="fulfillment-timeline">
+                  {order.fulfillment.history.map((event, index) => (
+                    <li key={`${event.recordedAt}-${event.status}-${index}`} className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">
+                        {STATUS_LABELS[event.status as UCPOrderStatus] || event.status}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{formatDate(event.recordedAt)}</p>
+                      {event.statusMessage ? (
+                        <p className="text-sm text-muted-foreground">{event.statusMessage}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
             </div>
             <div className="space-y-1">
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -761,7 +815,11 @@ export function OrderDetailPage() {
             onOpenChange={(open) => {
               if (processing !== 'dispatch') {
                 setDispatchDialogOpen(open);
-                if (!open) setTrackingId('');
+                if (!open) {
+                  setTrackingId('');
+                  setDeliveryProvider('');
+                  setLogisticsTransactionId('');
+                }
               }
             }}
           >
@@ -781,23 +839,52 @@ export function OrderDetailPage() {
                 className="space-y-5"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void handleDispatch(trackingId);
+                  void handleDispatch(trackingId, deliveryProvider, logisticsTransactionId);
                 }}
               >
                 <DialogHeader>
                   <DialogTitle>Dispatch order</DialogTitle>
                   <DialogDescription>
-                    Enter the courier tracking ID. This will mark the order as dispatched and share
-                    the tracking reference with the customer.
+                    Enter the actual tracking ID and either the delivery provider or the signed
+                    LOG10 search transaction that selected it.
                   </DialogDescription>
                 </DialogHeader>
+                <div className="space-y-2">
+                  <Label htmlFor="dispatch-provider">Delivery provider</Label>
+                  <Input
+                    id="dispatch-provider"
+                    name="deliveryProvider"
+                    autoComplete="organization"
+                    autoFocus
+                    value={deliveryProvider}
+                    onChange={(event) => setDeliveryProvider(event.target.value)}
+                    placeholder="For example, Delhivery"
+                    disabled={processing === 'dispatch'}
+                    required={!normalizeLogisticsTransactionId(logisticsTransactionId)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dispatch-logistics-transaction">LOG10 transaction ID</Label>
+                  <Input
+                    id="dispatch-logistics-transaction"
+                    name="logisticsTransactionId"
+                    autoComplete="off"
+                    value={logisticsTransactionId}
+                    onChange={(event) => setLogisticsTransactionId(event.target.value)}
+                    placeholder="Optional signed LOG10 search transaction"
+                    disabled={processing === 'dispatch'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    When supplied, AgentGuard verifies the signed P2P Immediate Delivery offer and
+                    uses its provider name.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="dispatch-tracking-id">Tracking ID</Label>
                   <Input
                     id="dispatch-tracking-id"
                     name="trackingId"
                     autoComplete="off"
-                    autoFocus
                     value={trackingId}
                     onChange={(event) => setTrackingId(event.target.value)}
                     placeholder="For example, SHIP-123456"
@@ -816,7 +903,12 @@ export function OrderDetailPage() {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={processing === 'dispatch' || !normalizeTrackingId(trackingId)}
+                    disabled={
+                      processing === 'dispatch' ||
+                      !normalizeTrackingId(trackingId) ||
+                      (!normalizeDeliveryProvider(deliveryProvider) &&
+                        !normalizeLogisticsTransactionId(logisticsTransactionId))
+                    }
                   >
                     {processing === 'dispatch' ? 'Dispatching…' : 'Confirm dispatch'}
                   </Button>

@@ -16,6 +16,8 @@ import {
   normalizeTrackingId,
   OrderDetailPage,
   refundConfirmationCopy,
+  refundAmountBlockedReason,
+  refundOutcomeLooksExecuted,
   sellerRefundTrustSatisfied,
 } from './OrderDetailPage';
 
@@ -79,6 +81,16 @@ describe('Seller OrderDetailPage (SDK-SELLER-ORDERS-003)', () => {
       expect(fullRefundAmount({ total: 95, refundedAmountInr: 40 })).toBe(55);
       expect(fullRefundAmount({ total: 95.4 })).toBe(95);
       expect(fullRefundAmount({ total: -1 })).toBe(0);
+      expect(refundAmountBlockedReason(179, 178)).toMatch(/exceeds the remaining order total/i);
+      expect(refundAmountBlockedReason(178, 178)).toBeNull();
+      expect(refundAmountBlockedReason(0, 178)).toMatch(/greater than zero/i);
+    });
+
+    it('does not treat need_approval as an executed refund', () => {
+      expect(refundOutcomeLooksExecuted('need_approval')).toBe(false);
+      expect(refundOutcomeLooksExecuted('succeeded')).toBe(true);
+      expect(refundOutcomeLooksExecuted('allow')).toBe(true);
+      expect(refundOutcomeLooksExecuted(undefined)).toBe(false);
     });
 
     it('treats the authenticated server principal as verified for AgentGuard refunds', () => {

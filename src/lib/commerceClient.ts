@@ -23,9 +23,10 @@ export interface DemoCommerceItem {
 
 export interface DemoCommerceOrder {
   order_id: string;
+  display_id?: string;
   transaction_id: string;
   message_id: string;
-  buyer_id: string;
+  buyer_id?: string;
   seller_id: string;
   item_id: string;
   item_title?: string;
@@ -66,6 +67,8 @@ export interface DemoCommerceOrder {
 }
 
 export type SellerCommerceOrder = UCPOrder & {
+  displayId?: string;
+  transactionId?: string;
   refundedAmountInr?: number;
   refundStatus?: string;
   paymentStatus?: string;
@@ -76,6 +79,53 @@ export type SellerCommerceOrder = UCPOrder & {
     recordedAt?: string;
   };
 };
+
+/** Same-origin seller order contract expected from the gateway. */
+export const SELLER_ORDERS_LIST_PATH = '/api/demo-commerce/seller/orders';
+
+export function sellerOrderDetailPath(orderId: string): string {
+  return `${SELLER_ORDERS_LIST_PATH}/${encodeURIComponent(String(orderId || '').trim())}`;
+}
+
+export function compactOrderLookup(value: string | null | undefined): string {
+  return String(value ?? '')
+    .replace(/-/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toUpperCase();
+}
+
+export function orderMatchesSellerLookup(
+  order: Pick<SellerCommerceOrder, 'id'> & {
+    displayId?: string;
+    transactionId?: string;
+  },
+  raw: string,
+): boolean {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return false;
+  const compact = customerReference(trimmed);
+  const hex = compactOrderLookup(trimmed);
+  return [order.id, order.displayId, order.transactionId].some((candidate) => {
+    const value = String(candidate || '');
+    if (!value) return false;
+    return (
+      value === trimmed ||
+      customerReference(value) === compact ||
+      compactOrderLookup(value) === hex
+    );
+  });
+}
+
+export function sellerOrdersFromPayload(data: unknown): DemoCommerceOrder[] {
+  if (Array.isArray(data)) return data as DemoCommerceOrder[];
+  if (!data || typeof data !== 'object') return [];
+  const record = data as { orders?: unknown; order?: unknown };
+  if (Array.isArray(record.orders)) return record.orders as DemoCommerceOrder[];
+  if (record.order && typeof record.order === 'object') {
+    return [record.order as DemoCommerceOrder];
+  }
+  return [];
+}
 
 export interface SellerCommerceIssue {
   issue_id: string;
@@ -237,12 +287,23 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     cancelled: 'cancelled',
     unknown: 'created',
   };
-  const status = fullyRefunded ? 'cancelled' : statusByCommerceStatus[order.status] ?? 'created';
-  const total = order.amount_inr;
-  const unitPrice = total / Math.max(order.quantity, 1);
+  const commerceStatus = String(order.status || '').trim().toLowerCase();
+  const status = fullyRefunded
+    ? 'cancelled'
+    : statusByCommerceStatus[commerceStatus] ?? 'created';
+  const total = Number(order.amount_inr) || 0;
+  const quantity = Math.max(Number(order.quantity) || 0, 1);
+  const unitPrice = total / quantity;
   const delivery = order.delivery_address;
+  const buyerId = String(order.buyer_id || '');
+  const buyerFallback = buyerId
+    ? `Customer ${buyerId.replace(/[^a-z0-9]/gi, '').slice(-8).toUpperCase() || 'PENDING'}`
+    : 'Unknown buyer';
+  const refundOutcome = String(order.refund_authorization?.outcome || '').trim();
   return {
     id: order.order_id,
+    displayId: order.display_id || customerReference(order.order_id),
+    transactionId: order.transaction_id || order.order_id,
     status,
     createdAt: order.created_at,
     updatedAt: order.updated_at,
@@ -250,7 +311,7 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
       {
         id: order.item_id,
         name: order.item_title || order.item_id,
-        quantity: order.quantity,
+        quantity: Number(order.quantity) || 0,
         price: { currency: 'INR', value: unitPrice.toFixed(2) },
       },
     ],
@@ -262,7 +323,7 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
       breakup: [],
     },
     buyer: {
-      name: delivery?.name || `Customer ${order.buyer_id.replace(/[^a-z0-9]/gi, '').slice(-8).toUpperCase()}`,
+      name: delivery?.name || buyerFallback,
       email: delivery?.email || '',
       phone: delivery?.phone || '',
       contact: {},
@@ -302,14 +363,14 @@ export function mapDemoOrderToSellerOrder(order: DemoCommerceOrder): SellerComme
     refundAuthorization: order.refund_authorization
       ? {
           receiptId: order.refund_authorization.receipt_id,
-          outcome: order.refund_authorization.outcome || 'succeeded',
+          outcome: refundOutcome,
           amountInr: Number(order.refund_authorization.amount_inr || 0),
           recordedAt: order.refund_authorization.recorded_at,
         }
       : undefined,
     paymentStatus:
       (fullyRefunded ? 'refunded' : order.refund_status) ||
-      (order.payment?.status === 'succeeded' || order.status === 'paid'
+      (order.payment?.status === 'succeeded' || commerceStatus === 'paid'
         ? 'paid'
         : order.payment?.status),
   };
@@ -364,31 +425,33 @@ export async function getSellerCatalogProduct(itemId: string) {
 }
 
 export async function listCommerceSellerOrders() {
-  const data = await demoFetch<{ orders: DemoCommerceOrder[]; count: number }>('/api/demo-commerce/seller/orders');
-  return data.orders.map(mapDemoOrderToSellerOrder);
+  const data = await demoFetch<{ orders?: DemoCommerceOrder[]; count?: number } | DemoCommerceOrder[]>(
+    SELLER_ORDERS_LIST_PATH,
+  );
+  return sellerOrdersFromPayload(data).map(mapDemoOrderToSellerOrder);
 }
 
 export async function getCommerceOrder(orderId: string) {
-  const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/seller/orders/${orderId}`);
+  const data = await demoFetch<{ order: DemoCommerceOrder }>(sellerOrderDetailPath(orderId));
   return mapDemoOrderToSellerOrder(data.order);
 }
 
-export async function resolveSellerOrderId(raw: string): Promise<string | null> {
+export async function loadSellerOrderByLookup(raw: string): Promise<SellerCommerceOrder | null> {
   const trimmed = String(raw || '').trim();
   if (!trimmed) return null;
   try {
     const order = await getCommerceOrder(trimmed);
-    if (order?.id) return order.id;
+    if (order?.id) return order;
   } catch (error) {
     if (!isCommerceNotFound(error)) throw error;
   }
   const orders = await listCommerceSellerOrders();
-  const compact = customerReference(trimmed);
-  const match = orders.find((order) => {
-    const id = String(order.id || '');
-    return id === trimmed || customerReference(id) === compact;
-  });
-  return match?.id ?? null;
+  return orders.find((order) => orderMatchesSellerLookup(order, trimmed)) ?? null;
+}
+
+export async function resolveSellerOrderId(raw: string): Promise<string | null> {
+  const order = await loadSellerOrderByLookup(raw);
+  return order?.id ?? null;
 }
 
 export async function getSellerStore(): Promise<SellerStoreSnapshot> {

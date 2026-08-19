@@ -7,10 +7,14 @@ import {
   isCommerceNotFound,
   listCommerceSellerOrders,
   listSellerCatalogResponse,
+  loadSellerOrderByLookup,
   mapDemoItemToCatalogItem,
   mapDemoOrderToSellerOrder,
+  orderMatchesSellerLookup,
   paymentStatusLabel,
   resolveSellerOrderId,
+  sellerOrderDetailPath,
+  sellerOrdersFromPayload,
   type DemoCommerceOrder,
 } from './commerceClient';
 
@@ -214,6 +218,60 @@ describe('mapDemoOrderToSellerOrder', () => {
       recordedAt: '2026-07-25T16:00:00Z',
     });
   });
+
+  it('does not treat a need_approval refund authorization as already executed', () => {
+    const mapped = mapDemoOrderToSellerOrder({
+      order_id: 'order-pending-refund',
+      transaction_id: 'txn-pending-refund',
+      message_id: 'msg-pending-refund',
+      buyer_id: 'buyer-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_title: 'Whole Wheat Atta 1kg',
+      item_version: 1,
+      quantity: 1,
+      amount_inr: 178,
+      status: 'paid',
+      refund_authorization: {
+        receipt_id: 'receipt_need_approval',
+        outcome: 'need_approval',
+        amount_inr: 178,
+        recorded_at: '2026-08-19T12:00:00Z',
+      },
+      created_at: '2026-08-19T12:00:00Z',
+      updated_at: '2026-08-19T12:00:00Z',
+    });
+    expect(mapped.status).toBe('created');
+    expect(mapped.refundAuthorization?.outcome).toBe('need_approval');
+    expect(mapped.refundAuthorization?.outcome).not.toBe('succeeded');
+  });
+
+  it('keeps an incoming paid order when buyer_id is missing', () => {
+    const mapped = mapDemoOrderToSellerOrder({
+      order_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      display_id: '7BA6FE24',
+      transaction_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      message_id: 'msg-live',
+      seller_id: 'principal:auth0:google-oauth2:1',
+      item_id: 'sampoorna-whole-wheat-atta-1kg',
+      item_title: 'Sampoorna Whole Wheat Atta 1kg',
+      item_version: 1,
+      quantity: 2,
+      amount_inr: 178,
+      status: 'paid',
+      created_at: '2026-08-19T12:00:00Z',
+      updated_at: '2026-08-19T12:00:00Z',
+    });
+    expect(mapped.id).toBe('7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff');
+    expect(mapped.displayId).toBe('7BA6FE24');
+    expect(mapped.transactionId).toBe('7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff');
+    expect(mapped.status).toBe('created');
+    expect(mapped.buyer?.name).toBe('Unknown buyer');
+    expect(mapped.items[0]).toMatchObject({
+      name: 'Sampoorna Whole Wheat Atta 1kg',
+      quantity: 2,
+    });
+  });
 });
 
 describe('Seller commerce read boundary', () => {
@@ -286,6 +344,45 @@ describe('Seller commerce read boundary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/demo-commerce\/seller\/orders$/);
     expect(fetchMock.mock.calls[1]?.[0]).toMatch(/\/api\/demo-commerce\/seller\/orders\/order-1$/);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ credentials: 'include' }));
+    expect(sellerOrderDetailPath('7BA6FE24')).toBe('/api/demo-commerce/seller/orders/7BA6FE24');
+    expect(sellerOrderDetailPath('7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff')).toBe(
+      '/api/demo-commerce/seller/orders/7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+    );
+  });
+
+  it('does not drop incoming orders when the gateway envelope only wraps data.orders', async () => {
+    const order = {
+      order_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      display_id: '7BA6FE24',
+      transaction_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      message_id: 'msg-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_title: 'Sampoorna Whole Wheat Atta 1kg',
+      item_version: 1,
+      quantity: 2,
+      amount_inr: 178,
+      status: 'paid',
+      created_at: '2026-08-19T00:00:00Z',
+      updated_at: '2026-08-19T00:00:00Z',
+    } satisfies DemoCommerceOrder;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { orders: [order], count: 1 } }),
+      })),
+    );
+
+    const listed = await listCommerceSellerOrders();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      id: order.order_id,
+      displayId: '7BA6FE24',
+      total: 178,
+      status: 'created',
+    });
   });
 });
 
@@ -305,6 +402,22 @@ describe('seller store and order resolution', () => {
   });
 
   it('resolves a compact customer reference to a visible order id', async () => {
+    const liveOrder = {
+      order_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      display_id: '7BA6FE24',
+      transaction_id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      message_id: 'msg-1',
+      buyer_id: 'buyer-1',
+      seller_id: 'seller-1',
+      item_id: 'item-1',
+      item_title: 'Sampoorna Whole Wheat Atta 1kg',
+      item_version: 1,
+      quantity: 2,
+      amount_inr: 178,
+      status: 'paid',
+      created_at: '2026-08-19T00:00:00Z',
+      updated_at: '2026-08-19T00:00:00Z',
+    } satisfies DemoCommerceOrder;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -313,7 +426,7 @@ describe('seller store and order resolution', () => {
           return {
             ok: false,
             status: 404,
-            json: async () => ({ success: false, detail: 'Not Found' }),
+            json: async () => ({ success: false, detail: "'order not found'" }),
           };
         }
         return {
@@ -322,22 +435,7 @@ describe('seller store and order resolution', () => {
           json: async () => ({
             success: true,
             data: {
-              orders: [
-                {
-                  order_id: 'order-7ba6fe24-live',
-                  transaction_id: 'txn-1',
-                  message_id: 'msg-1',
-                  buyer_id: 'buyer-1',
-                  seller_id: 'seller-1',
-                  item_id: 'item-1',
-                  item_version: 1,
-                  quantity: 1,
-                  amount_inr: 89,
-                  status: 'accepted',
-                  created_at: '2026-08-19T00:00:00Z',
-                  updated_at: '2026-08-19T00:00:00Z',
-                },
-              ],
+              orders: [liveOrder],
               count: 1,
             },
           }),
@@ -345,6 +443,17 @@ describe('seller store and order resolution', () => {
       }),
     );
 
-    await expect(resolveSellerOrderId('7BA6FE24')).resolves.toBe('order-7ba6fe24-live');
+    await expect(resolveSellerOrderId('7BA6FE24')).resolves.toBe(liveOrder.order_id);
+    const loaded = await loadSellerOrderByLookup('7BA6FE24');
+    expect(loaded).toMatchObject({
+      id: liveOrder.order_id,
+      displayId: '7BA6FE24',
+      total: 178,
+      status: 'created',
+      items: [expect.objectContaining({ name: 'Sampoorna Whole Wheat Atta 1kg', quantity: 2 })],
+    });
+    expect(orderMatchesSellerLookup(loaded!, '7BA6FE24')).toBe(true);
+    expect(sellerOrdersFromPayload({ orders: [liveOrder] })).toHaveLength(1);
+    expect(sellerOrdersFromPayload(undefined)).toEqual([]);
   });
 });

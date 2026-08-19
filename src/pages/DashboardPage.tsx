@@ -79,6 +79,9 @@ export function DashboardPage() {
                 Add product
               </Button>
             ) : null}
+            <Button type="button" variant="secondary" onClick={() => navigate('/business')}>
+              Store setup
+            </Button>
             {!isAuthenticated || itemCount > 0 ? (
               <Button type="button" variant="secondary" onClick={() => navigate('/catalog')}>
                 {isAuthenticated ? 'Open catalog' : 'Browse catalog'}

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SellerAssistantSettings } from './AgentGuardPage';
+import { SellerAssistantSettings, refundOutcomeHeadline } from './AgentGuardPage';
 
 const agentClient = vi.hoisted(() => ({
   ensureAgentGuard: vi.fn(),
@@ -170,5 +170,55 @@ describe('AgentGuardPage authority state', () => {
         }),
       ).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe('AgentGuard refund outcome copy', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    agentClient.ensureAgentGuard.mockResolvedValue({
+      agent: activeAgent,
+      mandate: activeMandate,
+      policy: {},
+    });
+    agentClient.fetchAgentGuardStatus.mockResolvedValue({
+      agent: null,
+      mandate: null,
+      policy: null,
+      receipts: [],
+    });
+  });
+
+  it('does not present need_approval as an executed refund', () => {
+    expect(refundOutcomeHeadline('need_approval', { hasReceipt: false })).toBe(
+      'Refund is waiting for one-time approval',
+    );
+    expect(refundOutcomeHeadline('need_approval', { hasReceipt: true })).not.toBe(
+      'Refund approved and executed',
+    );
+  });
+
+  it('celebrates allow only when a receipt exists', () => {
+    expect(refundOutcomeHeadline('allow', { hasReceipt: true })).toBe(
+      'Refund approved and executed',
+    );
+    expect(refundOutcomeHeadline('allow', { hasReceipt: false })).toBe(
+      'Refund was allowed but not executed',
+    );
+  });
+
+  it('renders need_approval from the query string without executed copy', async () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/config?tab=agent-guard&outcome=need_approval&amount=9000']}
+      >
+        <SellerAssistantSettings panel="authority" />
+      </MemoryRouter>,
+    );
+
+    const banner = await screen.findByTestId('agentguard-latest-outcome');
+    expect(banner).toHaveTextContent('Refund is waiting for one-time approval');
+    expect(banner).not.toHaveTextContent('Refund approved and executed');
   });
 });

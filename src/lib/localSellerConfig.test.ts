@@ -58,3 +58,46 @@ describe('localSellerConfig trust policy', () => {
     });
   });
 });
+
+describe('parseSellerNetworkConfigPayload', () => {
+  it('reads stored credentials from an enveloped seller config payload', async () => {
+    const { parseSellerNetworkConfigPayload } = await import('./localSellerConfig');
+    expect(
+      parseSellerNetworkConfigPayload({
+        success: true,
+        data: {
+          config: {
+            baseUrl: 'https://gateway.example',
+            subscriberId: 'seller.example',
+            keyId: 'seller-key-1',
+          },
+        },
+      }),
+    ).toMatchObject({
+      source: 'stored',
+      config: {
+        baseUrl: 'https://gateway.example',
+        subscriberId: 'seller.example',
+        keyId: 'seller-key-1',
+      },
+    });
+  });
+
+  it('names env-only credentials instead of looking disconnected', async () => {
+    const { parseSellerNetworkConfigPayload } = await import('./localSellerConfig');
+    const parsed = parseSellerNetworkConfigPayload({
+      source: 'env',
+      config: { subscriberId: 'ondc.example.com' },
+    });
+    expect(parsed.source).toBe('env');
+    expect(parsed.message).toMatch(/server environment/i);
+    expect(parsed.config.subscriberId).toBe('ondc.example.com');
+  });
+
+  it('explains an empty form without implying the store is disconnected', async () => {
+    const { parseSellerNetworkConfigPayload } = await import('./localSellerConfig');
+    const parsed = parseSellerNetworkConfigPayload({});
+    expect(parsed.source).toBe('none');
+    expect(parsed.message).toMatch(/environment credentials/i);
+  });
+});

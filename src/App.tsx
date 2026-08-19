@@ -9,7 +9,8 @@ import { OrdersPage } from './pages/OrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { AgentGuardPage } from './pages/AgentGuardPage';
 import { ConfigPage } from './pages/ConfigPage';
-import { SellerLandingPage } from './pages/SellerLandingPage';
+import { SellerLandingPage, SignInRequiredPage } from './pages/SellerLandingPage';
+import { BusinessPage } from './pages/BusinessPage';
 import { SamanthaOrb } from './components/SamanthaOrb';
 import { Button } from './components/ui/button';
 import {
@@ -196,7 +197,7 @@ export function RequireSellerSession({ children }: { children: ReactNode }) {
 
   if (!isAuthenticated) {
     const returnTo = `${location.pathname}${location.search}${location.hash}`;
-    return <Navigate to="/" replace state={{ returnTo }} />;
+    return <SignInRequiredPage returnTo={returnTo} />;
   }
 
   return children;
@@ -705,6 +706,14 @@ export function App() {
             element={
               <RequireSellerSession>
                 <DashboardPage />
+              </RequireSellerSession>
+            }
+          />
+          <Route
+            path="/business"
+            element={
+              <RequireSellerSession>
+                <BusinessPage />
               </RequireSellerSession>
             }
           />

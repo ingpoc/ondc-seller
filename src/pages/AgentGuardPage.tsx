@@ -68,6 +68,18 @@ async function withAuthorityLoadTimeout<T>(operation: Promise<T>): Promise<T> {
   }
 }
 
+export function refundOutcomeHeadline(
+  outcome: string | null,
+  options: { hasReceipt?: boolean } = {},
+): string | null {
+  if (!outcome) return null;
+  if (outcome === 'need_approval') return 'Refund is waiting for one-time approval';
+  if (outcome === 'deny' || outcome === 'paused') return 'Refund blocked by AgentGuard';
+  if (outcome === 'allow' && options.hasReceipt) return 'Refund approved and executed';
+  if (outcome === 'allow') return 'Refund was allowed but not executed';
+  return 'Refund was not executed';
+}
+
 export type SellerAssistantPanel = 'authority' | 'memory' | 'activity';
 
 export function SellerAssistantSettings({
@@ -284,11 +296,7 @@ export function SellerAssistantSettings({
           data-testid="agentguard-latest-outcome"
         >
           <p className="font-semibold text-foreground">
-            {latestOutcome === 'allow'
-              ? 'Refund approved and executed'
-              : latestOutcome === 'need_approval'
-                ? 'Refund is waiting for one-time approval'
-                : 'Refund blocked by AgentGuard'}
+            {refundOutcomeHeadline(latestOutcome, { hasReceipt: Boolean(latestReceipt) })}
           </p>
           {latestReceipt ? (
             <p className="mt-1 text-muted-foreground">

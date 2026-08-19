@@ -150,8 +150,13 @@ export function OrderCard({
       <div className="flex items-start justify-between gap-4 border-b border-[var(--ui-border)] pb-5">
         <div className="space-y-1">
           <div className="text-base font-semibold tracking-[-0.02em] text-[var(--ui-text)]">
-            Order reference {customerReference(order.id)}
+            Order reference {order.displayId || customerReference(order.id)}
           </div>
+          {order.transactionId ? (
+            <div className="text-sm text-[var(--ui-text-secondary)]">
+              Transaction {customerReference(order.transactionId)}
+            </div>
+          ) : null}
           <div className="text-sm text-[var(--ui-text-secondary)]">
             {new Date(order.createdAt).toLocaleDateString('en-US', {
               year: 'numeric',
@@ -230,7 +235,7 @@ export function OrderCard({
             variant="secondary"
             onClick={() => onViewDetails?.(order.id)}
           >
-            View order {customerReference(order.id)}
+            View order {order.displayId || customerReference(order.id)}
           </Button>
         </div>
       </div>

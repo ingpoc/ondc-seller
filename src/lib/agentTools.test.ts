@@ -10,6 +10,11 @@ vi.mock('./commerceClient', () => ({
   listCommerceSellerOrders: vi.fn(),
   listCommerceSellerItems: vi.fn(async () => []),
   resolveSellerOrderId: vi.fn(async (id: string) => id || null),
+  getCommerceOrder: vi.fn(async (id: string) => ({
+    id,
+    total: 10000,
+    refundedAmountInr: 0,
+  })),
 }));
 
 vi.mock('./agentGuardClient', () => ({
@@ -374,6 +379,28 @@ describe('seller agent tools', () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/not found/i);
+    expect(result.message).not.toMatch(/issued|approved and executed/i);
+    expect(executeProtectedAction).not.toHaveBeenCalled();
+  });
+
+  it('refund_issue blocks amount above the remaining order total', async () => {
+    const { getCommerceOrder, resolveSellerOrderId } = await import('./commerceClient');
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(resolveSellerOrderId).mockResolvedValueOnce('7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff');
+    vi.mocked(getCommerceOrder).mockResolvedValueOnce({
+      id: '7ba6fe24-aaaa-4bbb-8ccc-ddddeeeeffff',
+      total: 178,
+      refundedAmountInr: 0,
+    } as never);
+
+    const result = await runSellerTool(
+      'refund_issue',
+      { order_id: '7BA6FE24', amount_inr: 9000 },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/exceeds the remaining order total/i);
     expect(result.message).not.toMatch(/issued|approved and executed/i);
     expect(executeProtectedAction).not.toHaveBeenCalled();
   });

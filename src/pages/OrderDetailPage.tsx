@@ -24,13 +24,20 @@ import { COMMERCE_API_BASE, COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/
 import { listSellerOrderNotesForOrder } from '../lib/localSellerNotes';
 import {
   getCommerceOrder,
+  isCommerceNotFound,
   listCommerceSellerIssues,
+  loadSellerOrderByLookup,
   paymentStatusLabel,
   type SellerCommerceIssue,
   type SellerCommerceOrder,
 } from '../lib/commerceClient';
 import { customerReference } from '../lib/displayText';
 import { executeProtectedAction, verifyReceipt } from '../lib/agentGuardClient';
+import {
+  remainingRefundAmountInr,
+  refundAmountBlockedReason,
+  refundOutcomeLooksExecuted,
+} from '../lib/sellerRefundPolicy';
 import {
   LEGACY_ACTION_ALIASES,
   type Approval,
@@ -80,11 +87,13 @@ export function sellerRefundTrustSatisfied(
 export function fullRefundAmount(
   order: Pick<UCPOrder, 'total'> & { refundedAmountInr?: number }
 ): number {
-  return Math.max(
-    0,
-    Math.round(Number(order.total) || 0) - Math.round(Number(order.refundedAmountInr) || 0)
-  );
+  return remainingRefundAmountInr(order);
 }
+
+export {
+  refundAmountBlockedReason,
+  refundOutcomeLooksExecuted,
+};
 
 export function refundConfirmationCopy(
   amountInr: number,
@@ -195,9 +204,11 @@ export function OrderDetailPage() {
   const [remedyMessage, setRemedyMessage] = useState('');
   const [pendingApproval, setPendingApproval] = useState<Approval | null>(null);
   const [refundConfirmation, setRefundConfirmation] = useState<number | null>(null);
+  const [refundDraft, setRefundDraft] = useState('');
   const [lastReceipt, setLastReceipt] = useState<IntentReceipt | null>(null);
   const [agentGuardMessage, setAgentGuardMessage] = useState<string | null>(null);
   const orderNotes = order ? listSellerOrderNotesForOrder(order.id) : [];
+  const canonicalOrderId = order?.id || id || '';
 
   useEffect(() => {
     const loadOrder = async () => {
@@ -208,16 +219,31 @@ export function OrderDetailPage() {
       }
 
       try {
-        // The shared commerce exchange is the portfolio order source in both
-        // local and deployed AgentGuard lanes. A configured legacy UCP API is
-        // the only fallback; browser fixtures cannot become order authority.
+        // Same-origin GET /api/demo-commerce/seller/orders/{order_id|display_id}.
+        // Compact 8-char buyer refs (7BA6FE24) and UUIDs must both resolve.
         try {
-          setOrder(await getCommerceOrder(id));
-          setIssues(await listCommerceSellerIssues(id));
+          const resolved = await loadSellerOrderByLookup(id);
+          if (!resolved) {
+            setOrder(null);
+            setError(null);
+            return;
+          }
+          setOrder(resolved);
+          setRefundDraft(String(fullRefundAmount(resolved) || ''));
+          try {
+            setIssues(await listCommerceSellerIssues(resolved.id));
+          } catch {
+            setIssues([]);
+          }
           return;
         } catch (commerceError) {
+          if (isCommerceNotFound(commerceError)) {
+            setOrder(null);
+            setError(null);
+            return;
+          }
           if (!COMMERCE_DEMO_MODE && COMMERCE_API_BASE) {
-            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${id}`), {
+            const response = await fetch(buildCommerceUrl(`/api/seller/orders/${encodeURIComponent(id)}`), {
               credentials: 'include',
             });
             if (!response.ok) throw commerceError;
@@ -228,7 +254,12 @@ export function OrderDetailPage() {
           throw commerceError;
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load order');
+        if (isCommerceNotFound(err)) {
+          setOrder(null);
+          setError(null);
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to load order');
+        }
       } finally {
         setLoading(false);
       }
@@ -238,11 +269,11 @@ export function OrderDetailPage() {
   }, [id]);
 
   async function handleAccept() {
-    if (!order || !id) return;
+    if (!order || !canonicalOrderId) return;
     if (!canMutateSellerOrder(order.status, 'accept')) {
       recordSellerActionAuditEvent({
         action: 'order_accept',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
@@ -258,9 +289,9 @@ export function OrderDetailPage() {
         walletAddress,
         action: 'seller.order.accept',
         amountInr: 0,
-        resourceId: id,
-        idempotencyKey: `seller.order.accept:${id}`,
-        payload: { order_id: id },
+        resourceId: canonicalOrderId,
+        idempotencyKey: `seller.order.accept:${canonicalOrderId}`,
+        payload: { order_id: canonicalOrderId },
       });
       if (!executed.execution) {
         throw new Error(
@@ -271,14 +302,14 @@ export function OrderDetailPage() {
       }
       recordSellerActionAuditEvent({
         action: 'order_accept',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
         outcome: 'applied',
         reason: 'Accepted seller order through commerce API.',
       });
-      setOrder(await getCommerceOrder(id));
+      setOrder(await getCommerceOrder(canonicalOrderId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept order');
     } finally {
@@ -287,11 +318,11 @@ export function OrderDetailPage() {
   }
 
   async function handleReject() {
-    if (!order || !id) return;
+    if (!order || !canonicalOrderId) return;
     if (!canMutateSellerOrder(order.status, 'reject')) {
       recordSellerActionAuditEvent({
         action: 'order_reject',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
@@ -303,7 +334,7 @@ export function OrderDetailPage() {
     }
     if (
       !confirm(
-        `Reject order ${customerReference(id)}? The customer order will be cancelled. This cannot be undone.`
+        `Reject order ${customerReference(canonicalOrderId)}? The customer order will be cancelled. This cannot be undone.`
       )
     )
       return;
@@ -314,9 +345,9 @@ export function OrderDetailPage() {
         walletAddress,
         action: 'seller.order.reject',
         amountInr: 0,
-        resourceId: id,
-        idempotencyKey: `seller.order.reject:${id}`,
-        payload: { order_id: id, reason: 'Seller rejected the order' },
+        resourceId: canonicalOrderId,
+        idempotencyKey: `seller.order.reject:${canonicalOrderId}`,
+        payload: { order_id: canonicalOrderId, reason: 'Seller rejected the order' },
       });
       if (!executed.execution) {
         throw new Error(
@@ -327,14 +358,14 @@ export function OrderDetailPage() {
       }
       recordSellerActionAuditEvent({
         action: 'order_reject',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
         outcome: 'applied',
         reason: 'Rejected seller order through commerce API.',
       });
-      setOrder(await getCommerceOrder(id));
+      setOrder(await getCommerceOrder(canonicalOrderId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject order');
     } finally {
@@ -347,11 +378,11 @@ export function OrderDetailPage() {
     requestedProvider: string,
     requestedLogisticsTransactionId: string
   ) {
-    if (!order || !id) return;
+    if (!order || !canonicalOrderId) return;
     if (!canMutateSellerOrder(order.status, 'dispatch')) {
       recordSellerActionAuditEvent({
         action: 'order_dispatch',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
@@ -381,10 +412,10 @@ export function OrderDetailPage() {
         walletAddress,
         action: 'seller.fulfilment.commit',
         amountInr: 0,
-        resourceId: id,
-        idempotencyKey: `seller.fulfilment.commit:${id}`,
+        resourceId: canonicalOrderId,
+        idempotencyKey: `seller.fulfilment.commit:${canonicalOrderId}`,
         payload: {
-          order_id: id,
+          order_id: canonicalOrderId,
           status: 'shipped',
           tracking_id: normalizedTrackingId,
           ...(normalizedProvider ? { provider_name: normalizedProvider } : {}),
@@ -403,14 +434,14 @@ export function OrderDetailPage() {
       }
       recordSellerActionAuditEvent({
         action: 'order_dispatch',
-        targetId: id,
+        targetId: canonicalOrderId,
         walletAddress,
         subjectId,
         trustState: trust.state,
         outcome: 'applied',
         reason: 'Dispatched seller order through commerce API.',
       });
-      setOrder(await getCommerceOrder(id));
+      setOrder(await getCommerceOrder(canonicalOrderId));
       setDispatchDialogOpen(false);
       setTrackingId('');
       setDeliveryProvider('');
@@ -426,7 +457,7 @@ export function OrderDetailPage() {
     mutation: 'prepare' | 'complete',
     targetStatus: 'preparing' | 'delivered',
   ) {
-    if (!order || !id || !canMutateSellerOrder(order.status, mutation)) return;
+    if (!order || !canonicalOrderId || !canMutateSellerOrder(order.status, mutation)) return;
     setProcessing(mutation);
     setError(null);
     try {
@@ -434,10 +465,10 @@ export function OrderDetailPage() {
         walletAddress,
         action: 'seller.fulfilment.commit',
         amountInr: 0,
-        resourceId: id,
-        idempotencyKey: `seller.fulfilment.commit:${id}:${targetStatus}`,
+        resourceId: canonicalOrderId,
+        idempotencyKey: `seller.fulfilment.commit:${canonicalOrderId}:${targetStatus}`,
         payload: {
-          order_id: id,
+          order_id: canonicalOrderId,
           status: targetStatus,
           status_message:
             targetStatus === 'preparing'
@@ -448,7 +479,7 @@ export function OrderDetailPage() {
       if (!executed.execution) {
         throw new Error('Fulfilment update was denied by AgentGuard.');
       }
-      setOrder(await getCommerceOrder(id));
+      setOrder(await getCommerceOrder(canonicalOrderId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update fulfilment');
     } finally {
@@ -480,7 +511,7 @@ export function OrderDetailPage() {
         throw new Error('The remedy receipt could not be verified.');
       }
       setLastReceipt(executed.receipt);
-      setIssues(await listCommerceSellerIssues(id));
+      setIssues(await listCommerceSellerIssues(canonicalOrderId));
       setRemedyMessage('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to promise remedy');
@@ -490,8 +521,8 @@ export function OrderDetailPage() {
   }
 
   async function applyAllowedRefund(amountInr: number, receipt: IntentReceipt) {
-    if (!id) return;
-    setOrder(await getCommerceOrder(id));
+    if (!canonicalOrderId) return;
+    setOrder(await getCommerceOrder(canonicalOrderId));
     setLastReceipt(receipt);
     setPendingApproval(null);
     setAgentGuardMessage(
@@ -500,8 +531,13 @@ export function OrderDetailPage() {
   }
 
   async function handleAgentGuardRefund(amountInr: number) {
-    if (!order || !id) return;
+    if (!order || !canonicalOrderId) return;
     setRefundConfirmation(null);
+    const blocked = refundAmountBlockedReason(amountInr, fullRefundAmount(order));
+    if (blocked) {
+      setAgentGuardMessage(blocked);
+      return;
+    }
     // AgentGuard binds cookie principal; wallet is legacy hangar only.
     if (!subjectId) {
       setError('Sign in before AgentGuard refunds.');
@@ -517,45 +553,42 @@ export function OrderDetailPage() {
     setAgentGuardMessage(null);
     try {
       const refundAttemptId = globalThis.crypto.randomUUID();
-      // Prefer execute boundary for in-policy refunds (evaluate+commerce in one call).
-      try {
-        const executed = await executeProtectedAction({
-          walletAddress,
-          action: LEGACY_ACTION_ALIASES.refund,
-          amountInr,
-          resourceId: id,
-          idempotencyKey: `seller-refund:${id}:${amountInr}:${refundAttemptId}`,
-          payload: { order_id: id },
-        });
-        if (executed.decision === 'need_approval' && executed.approval) {
-          setPendingApproval(executed.approval);
-          setAgentGuardMessage(
-            executed.approval ? 'Approval required for this refund.' : 'Approval required.'
-          );
-          return;
-        }
-        if (executed.receipt) {
-          if (executed.receipt.outcome === 'paused' || executed.decision === 'deny') {
-            setAgentGuardMessage(
-              executed.receipt.outcome === 'paused' || /paus/i.test(String(executed.decision))
-                ? 'Agent is paused.'
-                : 'Refund denied while agent is paused or out of policy.'
-            );
-            setLastReceipt(executed.receipt);
-            return;
-          }
-          await applyAllowedRefund(amountInr, executed.receipt);
-          const verified = await verifyReceipt({ receiptId: executed.receipt.receipt_id });
-          if (verified.valid) {
-            setAgentGuardMessage(
-              `Refund INR ${amountInr} allowed. Authorization reference ${customerReference(executed.receipt.receipt_id)} verified.`
-            );
-          }
-          return;
-        }
-      } catch (err) {
-        throw err;
+      const executed = await executeProtectedAction({
+        walletAddress,
+        action: LEGACY_ACTION_ALIASES.refund,
+        amountInr,
+        resourceId: canonicalOrderId,
+        idempotencyKey: `seller-refund:${canonicalOrderId}:${amountInr}:${refundAttemptId}`,
+        payload: { order_id: canonicalOrderId },
+      });
+      if (executed.decision === 'need_approval') {
+        setPendingApproval(executed.approval ?? null);
+        setLastReceipt(null);
+        setAgentGuardMessage('Approval required for this refund.');
+        return;
       }
+      if (executed.decision === 'deny' || executed.receipt?.outcome === 'paused') {
+        setAgentGuardMessage(
+          executed.receipt?.outcome === 'paused' || /paus/i.test(String(executed.decision))
+            ? 'Agent is paused.'
+            : 'Refund denied while agent is paused or out of policy.'
+        );
+        if (executed.receipt && !refundOutcomeLooksExecuted(executed.receipt.outcome)) {
+          setLastReceipt(executed.receipt);
+        }
+        return;
+      }
+      if (executed.decision === 'allow' && executed.receipt && refundOutcomeLooksExecuted(executed.receipt.outcome || 'allow')) {
+        await applyAllowedRefund(amountInr, executed.receipt);
+        const verified = await verifyReceipt({ receiptId: executed.receipt.receipt_id });
+        if (verified.valid) {
+          setAgentGuardMessage(
+            `Refund INR ${amountInr} allowed. Authorization reference ${customerReference(executed.receipt.receipt_id)} verified.`
+          );
+        }
+        return;
+      }
+      setAgentGuardMessage('Refund was not executed.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AgentGuard refund failed');
     } finally {
@@ -567,6 +600,16 @@ export function OrderDetailPage() {
     if (!pendingApproval || !subjectId) {
       setError('No pending approval.');
       return;
+    }
+    if (order) {
+      const blocked = refundAmountBlockedReason(
+        pendingApproval.amount_inr,
+        fullRefundAmount(order),
+      );
+      if (blocked) {
+        setAgentGuardMessage(blocked);
+        return;
+      }
     }
     setProcessing('approve');
     setError(null);
@@ -628,6 +671,9 @@ export function OrderDetailPage() {
           <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
             Order not found
           </h1>
+          <p className="text-sm text-muted-foreground">
+            This seller has no incoming order for that reference.
+          </p>
         </div>
         <Button variant="secondary" className="w-fit" onClick={() => navigate('/orders')}>
           Back to orders
@@ -648,9 +694,14 @@ export function OrderDetailPage() {
             Order detail
           </div>
           <h1 className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
-            Order reference {customerReference(order.id)}
+            Order reference {order.displayId || customerReference(order.id)}
           </h1>
           <p className="text-sm text-muted-foreground">Placed on {formatDate(order.createdAt)}</p>
+          {order.transactionId ? (
+            <p className="text-sm text-muted-foreground">
+              Transaction {customerReference(order.transactionId)}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge className={getStatusTone(order.status)}>{STATUS_LABELS[order.status]}</Badge>
@@ -988,7 +1039,7 @@ export function OrderDetailPage() {
               : 'The full order value has been refunded. No further refund is available.'}
           </p>
           {fullRefundAmount(order) > 0 ? (
-            refundConfirmation === fullRefundAmount(order) ? (
+            refundConfirmation != null && refundAmountBlockedReason(refundConfirmation, fullRefundAmount(order)) === null ? (
               <div
                 className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4"
                 role="alertdialog"
@@ -996,12 +1047,12 @@ export function OrderDetailPage() {
                 aria-describedby="refund-confirmation-description"
               >
                 <p id="refund-confirmation-title" className="font-medium text-foreground">
-                  Confirm full refund
+                  Confirm refund
                 </p>
                 <p id="refund-confirmation-description" className="text-sm text-muted-foreground">
                   {refundConfirmationCopy(
                     refundConfirmation,
-                    customerReference(order.id),
+                    order.displayId || customerReference(order.id),
                     order.buyer?.name ?? 'the customer'
                   )}{' '}
                   AgentGuard checks the action after you confirm.
@@ -1013,7 +1064,7 @@ export function OrderDetailPage() {
                     disabled={!!processing}
                     onClick={() => void handleAgentGuardRefund(refundConfirmation)}
                   >
-                    Confirm full refund
+                    Confirm refund
                   </Button>
                   <Button
                     type="button"
@@ -1026,14 +1077,60 @@ export function OrderDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  data-testid="refund-full-amount"
-                  disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
-                  onClick={() => setRefundConfirmation(fullRefundAmount(order))}
-                >
-                  {`Review full refund (INR ${fullRefundAmount(order).toLocaleString('en-IN')})`}
-                </Button>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="seller-refund-amount">Refund amount (INR)</Label>
+                  <Input
+                    id="seller-refund-amount"
+                    data-testid="refund-amount-input"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={fullRefundAmount(order)}
+                    value={refundDraft}
+                    onChange={(event) => {
+                      setRefundDraft(event.target.value);
+                      setRefundConfirmation(null);
+                    }}
+                    disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Remaining refundable total: INR {fullRefundAmount(order).toLocaleString('en-IN')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    data-testid="refund-full-amount"
+                    disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
+                    onClick={() => {
+                      const remaining = fullRefundAmount(order);
+                      setRefundDraft(String(remaining));
+                      setRefundConfirmation(remaining);
+                    }}
+                  >
+                    {`Review full refund (INR ${fullRefundAmount(order).toLocaleString('en-IN')})`}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    data-testid="review-refund-amount"
+                    disabled={!!processing || (!COMMERCE_DEMO_MODE && trust.loading) || !subjectId}
+                    onClick={() => {
+                      const amount = Math.round(Number(refundDraft) || 0);
+                      const blocked = refundAmountBlockedReason(amount, fullRefundAmount(order));
+                      if (blocked) {
+                        setAgentGuardMessage(blocked);
+                        setRefundConfirmation(null);
+                        return;
+                      }
+                      setError(null);
+                      setAgentGuardMessage(null);
+                      setRefundConfirmation(amount);
+                    }}
+                  >
+                    Review entered amount
+                  </Button>
+                </div>
               </div>
             )
           ) : null}
@@ -1053,7 +1150,7 @@ export function OrderDetailPage() {
               </Button>
             </div>
           ) : null}
-          {lastReceipt ? (
+          {lastReceipt && refundOutcomeLooksExecuted(lastReceipt.outcome) ? (
             <p className="text-sm text-muted-foreground" data-testid="agentguard-last-receipt">
               Last authorization reference: {customerReference(lastReceipt.receipt_id)} ·{' '}
               {lastReceipt.outcome} · INR{' '}
@@ -1065,8 +1162,14 @@ export function OrderDetailPage() {
                   ?? 0
               )}
             </p>
+          ) : lastReceipt ? (
+            <p className="text-sm text-foreground" data-testid="agentguard-last-receipt">
+              Refund is waiting for one-time approval. Not executed.
+            </p>
           ) : null}
-          {!lastReceipt && order.refundAuthorization ? (
+          {!lastReceipt &&
+          order.refundAuthorization &&
+          refundOutcomeLooksExecuted(order.refundAuthorization.outcome) ? (
             <div
               className="space-y-1 rounded-xl border border-border/70 bg-muted/40 p-3 text-sm text-foreground"
               data-testid="agentguard-durable-refund-receipt"
@@ -1080,6 +1183,10 @@ export function OrderDetailPage() {
                 Signed AgentGuard receipt ID: {order.refundAuthorization.receiptId}
               </p>
             </div>
+          ) : !lastReceipt && order.refundAuthorization ? (
+            <p className="text-sm text-foreground" data-testid="agentguard-durable-refund-receipt">
+              Refund authorization is waiting for one-time approval. Not executed.
+            </p>
           ) : null}
         </CardContent>
       </Card>

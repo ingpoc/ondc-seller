@@ -7,11 +7,13 @@
 import { executeProtectedAction } from './agentGuardClient';
 import { buildAgentControlPlaneUrl } from './agentControlPlane';
 import {
+  getCommerceOrder,
   listCommerceSellerItems,
   listCommerceSellerOrders,
   resolveSellerOrderId,
   type DemoCommerceItem,
 } from './commerceClient';
+import { remainingRefundAmountInr, refundAmountBlockedReason, refundOutcomeLooksExecuted } from './sellerRefundPolicy';
 import { rememberSamanthaFact } from './samanthaMemory';
 import { startSellerRuntimeBackground } from './samanthaRuntimeHandoff';
 
@@ -643,6 +645,25 @@ export async function runSellerTool(
     return { ok: false, tool: name, message: 'No visible Seller order is available to refund.' };
   }
   try {
+    const order = await getCommerceOrder(orderId);
+    const blocked = refundAmountBlockedReason(amountInr, remainingRefundAmountInr(order));
+    if (blocked) {
+      return {
+        ok: false,
+        tool: name,
+        message: `${blocked} Refund was not executed.`,
+        navigateTo: `/orders/${encodeURIComponent(orderId)}`,
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      tool: name,
+      message: err instanceof Error ? err.message : 'Could not load Seller order.',
+      navigateTo: `/orders/${encodeURIComponent(orderId)}`,
+    };
+  }
+  try {
     const executed = await executeProtectedAction({
       walletAddress: wallet || null,
       action: 'seller.refund.issue',
@@ -656,8 +677,11 @@ export async function runSellerTool(
       executed.decision === 'deny'
         ? executed.decision
         : 'unknown';
-    const receiptId = executed.receipt?.receipt_id;
-    const executedNow = decision === 'allow' && Boolean(receiptId || executed.execution);
+      const receiptId = executed.receipt?.receipt_id;
+      const executedNow =
+        decision === 'allow' &&
+        Boolean(receiptId || executed.execution) &&
+        refundOutcomeLooksExecuted(executed.receipt?.outcome || (decision === 'allow' ? 'allow' : ''));
     const outcomeQuery = new URLSearchParams({
       outcome: decision === 'allow' && !executedNow ? 'unknown' : decision,
     });

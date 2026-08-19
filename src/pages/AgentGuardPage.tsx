@@ -200,7 +200,20 @@ export function SellerAssistantSettings({
         payload: { order_id: pendingResource },
       });
       const receiptId = executed.receipt?.receipt_id;
-      setSearchParams(receiptId ? { outcome: 'allow', receipt: receiptId } : { outcome: 'allow' });
+      if (executed.decision === 'need_approval') {
+        setSearchParams({
+          outcome: 'need_approval',
+          amount: String(pendingAmount),
+          resource: pendingResource,
+          ...(executed.approval?.approval_id ? { approval: executed.approval.approval_id } : {}),
+        });
+        return;
+      }
+      setSearchParams(
+        receiptId && executed.decision === 'allow'
+          ? { outcome: 'allow', receipt: receiptId }
+          : { outcome: executed.decision === 'deny' ? 'deny' : 'unknown' },
+      );
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Approval failed');

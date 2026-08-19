@@ -9,6 +9,7 @@ import {
 vi.mock('./commerceClient', () => ({
   listCommerceSellerOrders: vi.fn(),
   listCommerceSellerItems: vi.fn(async () => []),
+  resolveSellerOrderId: vi.fn(async (id: string) => id || null),
 }));
 
 vi.mock('./agentGuardClient', () => ({
@@ -316,7 +317,10 @@ describe('seller agent tools', () => {
       { subjectId: 'principal:demo:s' },
     );
     expect(result.decision).toBe('need_approval');
+    expect(result.ok).toBe(false);
     expect(result.message).toMatch(/approval/i);
+    expect(result.message).not.toMatch(/issued|executed/i);
+    expect(result.navigateTo).toMatch(/outcome=need_approval/);
   });
 
   it('refund_issue resolves the latest visible order when order_id is omitted', async () => {
@@ -355,6 +359,41 @@ describe('seller agent tools', () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/no visible seller order/i);
+  });
+
+  it('refund_issue does not execute or celebrate a missing order', async () => {
+    const { resolveSellerOrderId } = await import('./commerceClient');
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(resolveSellerOrderId).mockResolvedValueOnce(null);
+
+    const result = await runSellerTool(
+      'refund_issue',
+      { order_id: '7BA6FE24', amount_inr: 9000 },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/not found/i);
+    expect(result.message).not.toMatch(/issued|approved and executed/i);
+    expect(executeProtectedAction).not.toHaveBeenCalled();
+  });
+
+  it('refund_issue reports AgentGuard deny while paused', async () => {
+    const { executeProtectedAction } = await import('./agentGuardClient');
+    vi.mocked(executeProtectedAction).mockResolvedValueOnce({
+      decision: 'deny',
+      receipt: undefined,
+    });
+
+    const result = await runSellerTool(
+      'refund_issue',
+      { order_id: 'ord-paused', amount_inr: 100 },
+      { subjectId: 'principal:demo:s' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.decision).toBe('deny');
+    expect(result.message).toMatch(/denied/i);
   });
 
   it('delegate_to_runtime_agent fails clearly when runtime check fails', async () => {

@@ -24,7 +24,10 @@ describe('Seller signed-out boundary', () => {
     mockUseAuthContext.mockReturnValue(authState());
   });
 
-  it('redirects a signed-out deep link before protected content mounts', async () => {
+  it('asks a signed-out deep link to sign in and keeps the return-to path', async () => {
+    const login = vi.fn();
+    mockUseAuthContext.mockReturnValue(authState({ login }));
+
     render(
       <MemoryRouter initialEntries={['/orders/private-order']}>
         <Routes>
@@ -41,8 +44,14 @@ describe('Seller signed-out boundary', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Public seller home')).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Sign in required' })).toBeVisible();
+    expect(screen.getByTestId('signin-return-to')).toHaveTextContent('/orders/private-order');
     expect(screen.queryByText('Private customer order')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Run your store with clear control' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in to continue' }));
+    expect(login).toHaveBeenCalledWith('/orders/private-order');
   });
 
   it('mounts protected content only for an authenticated seller', () => {

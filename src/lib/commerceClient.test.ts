@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CommerceClientError,
   getCommerceOrder,
   getSellerCatalogProduct,
+  getSellerStore,
+  isCommerceNotFound,
   listCommerceSellerOrders,
   listSellerCatalogResponse,
   mapDemoItemToCatalogItem,
   mapDemoOrderToSellerOrder,
   paymentStatusLabel,
+  resolveSellerOrderId,
   type DemoCommerceOrder,
 } from './commerceClient';
 
@@ -282,5 +286,65 @@ describe('Seller commerce read boundary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/demo-commerce\/seller\/orders$/);
     expect(fetchMock.mock.calls[1]?.[0]).toMatch(/\/api\/demo-commerce\/seller\/orders\/order-1$/);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ credentials: 'include' }));
+  });
+});
+
+describe('seller store and order resolution', () => {
+  it('treats a missing store record as empty setup, not a fatal error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, detail: 'Not Found' }),
+      })),
+    );
+
+    await expect(getSellerStore()).resolves.toEqual({ store: null, setup_required: true });
+    expect(isCommerceNotFound(new CommerceClientError('Not Found', 404))).toBe(true);
+  });
+
+  it('resolves a compact customer reference to a visible order id', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/orders/7BA6FE24')) {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ success: false, detail: 'Not Found' }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: {
+              orders: [
+                {
+                  order_id: 'order-7ba6fe24-live',
+                  transaction_id: 'txn-1',
+                  message_id: 'msg-1',
+                  buyer_id: 'buyer-1',
+                  seller_id: 'seller-1',
+                  item_id: 'item-1',
+                  item_version: 1,
+                  quantity: 1,
+                  amount_inr: 89,
+                  status: 'accepted',
+                  created_at: '2026-08-19T00:00:00Z',
+                  updated_at: '2026-08-19T00:00:00Z',
+                },
+              ],
+              count: 1,
+            },
+          }),
+        };
+      }),
+    );
+
+    await expect(resolveSellerOrderId('7BA6FE24')).resolves.toBe('order-7ba6fe24-live');
   });
 });

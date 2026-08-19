@@ -21,9 +21,11 @@ import { COMMERCE_DEMO_MODE, buildCommerceUrl } from '../lib/commerceConfig';
 import { recordSellerActionAuditEvent } from '../lib/localSellerAudit';
 import {
   canMutateSellerConfig,
+  parseSellerNetworkConfigPayload,
   readLocalSellerConfig,
   saveVerifiedLocalSellerConfig,
   type SellerClientConfig,
+  type SellerNetworkConfigSource,
 } from '../lib/localSellerConfig';
 import {
   buildSellerActionHeaders,
@@ -123,6 +125,9 @@ export function ConfigPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [networkSource, setNetworkSource] = useState<SellerNetworkConfigSource>('none');
+  const [networkNote, setNetworkNote] = useState<string | null>(null);
+  const envOnlyCredentials = networkSource === 'env';
   const canChangeConfiguration =
     !trust.loading &&
     (elevatedTrustSatisfied(trust.state, principalId) || canMutateSellerConfig(trust.state));
@@ -139,6 +144,13 @@ export function ConfigPage() {
         const localConfig = readLocalSellerConfig();
         if (localConfig) {
           setConfig((prev) => ({ ...prev, ...localConfig }));
+          setNetworkSource('stored');
+          setNetworkNote(null);
+        } else {
+          setNetworkSource('none');
+          setNetworkNote(
+            'No seller network credentials are saved in this browser form. The gateway may still use environment credentials that this page cannot display.',
+          );
         }
         return;
       }
@@ -146,14 +158,24 @@ export function ConfigPage() {
       const response = await fetch(buildCommerceUrl('/api/seller/config'), {
         credentials: 'include',
       });
+      const payload = await response.json().catch(() => ({}));
+      const parsed = parseSellerNetworkConfigPayload(payload);
+      setConfig((prev) => ({ ...prev, ...parsed.config }));
       if (response.ok) {
-        const data = await response.json();
-        if (data.config) {
-          setConfig((prev) => ({ ...prev, ...data.config }));
-        }
+        setNetworkSource(parsed.source);
+        setNetworkNote(parsed.message ?? null);
+        return;
       }
+      setNetworkSource(parsed.source === 'env' ? 'env' : 'none');
+      setNetworkNote(
+        parsed.message ||
+          'No seller network credentials are saved in this browser form. The gateway may still use environment credentials that this page cannot display.',
+      );
     } catch {
-      // Ignore initial fetch errors when config has not been created yet.
+      setNetworkSource('none');
+      setNetworkNote(
+        'No seller network credentials are saved in this browser form. The gateway may still use environment credentials that this page cannot display.',
+      );
     } finally {
       setLoading(false);
     }
@@ -185,9 +207,17 @@ export function ConfigPage() {
   }
 
   async function handleSave() {
+    setTestResult(null);
+    if (envOnlyCredentials) {
+      setTestResult({
+        success: false,
+        message: 'Server environment credentials cannot be overwritten from this form.',
+      });
+      return;
+    }
+
     const validationErrors = validate();
     setErrors(validationErrors);
-    setTestResult(null);
 
     if (validationErrors.length > 0) {
       return;
@@ -284,6 +314,12 @@ export function ConfigPage() {
 
   async function handleGenerateKeyPair() {
     try {
+      if (envOnlyCredentials) {
+        throw new Error(
+          'Server environment credentials cannot be replaced from this form. Keys are not generated automatically.',
+        );
+      }
+
       if (!canChangeConfiguration) {
         const decision = evaluateSellerActionPolicy('seller_config_generate_keys', {
           trustState: trust.state,
@@ -582,15 +618,25 @@ export function ConfigPage() {
             <Card>
               <CardContent className="flex flex-col gap-2 p-4 text-sm">
                 <Badge className="w-fit bg-secondary text-secondary-foreground">
-                  {connectionDetailsComplete
-                    ? 'Connection details ready to test'
-                    : 'Connection details incomplete'}
+                  {envOnlyCredentials
+                    ? 'Using server environment credentials'
+                    : connectionDetailsComplete
+                      ? 'Connection details ready to test'
+                      : 'Connection details incomplete'}
                 </Badge>
                 <p className="text-muted-foreground">
-                  Generating a key pair only replaces the values in this form. Saving makes those
-                  signing credentials active; test the connection after saving. Replacing active
-                  keys can interrupt signed requests until the matching public key is registered.
+                  {envOnlyCredentials
+                    ? networkNote
+                    : networkNote ||
+                      'Generating a key pair only replaces the values in this form. Saving makes those signing credentials active; test the connection after saving. Replacing active keys can interrupt signed requests until the matching public key is registered.'}
                 </p>
+                {!envOnlyCredentials && networkNote ? (
+                  <p className="text-muted-foreground">
+                    Generating a key pair only replaces the values in this form. Saving makes those
+                    signing credentials active; test the connection after saving. Replacing active
+                    keys can interrupt signed requests until the matching public key is registered.
+                  </p>
+                ) : null}
               </CardContent>
             </Card>
 
@@ -697,7 +743,7 @@ export function ConfigPage() {
                             type="button"
                             variant="secondary"
                             size="sm"
-                            disabled={!canChangeConfiguration}
+                            disabled={!canChangeConfiguration || envOnlyCredentials}
                             aria-describedby="seller-network-key-safeguard"
                             onClick={() => void handleGenerateKeyPair()}
                           >
@@ -804,7 +850,12 @@ export function ConfigPage() {
               <div className="flex flex-wrap gap-3">
                 <Button
                   type="submit"
-                  disabled={loading || !canChangeConfiguration || !connectionDetailsComplete}
+                  disabled={
+                    loading ||
+                    envOnlyCredentials ||
+                    !canChangeConfiguration ||
+                    !connectionDetailsComplete
+                  }
                 >
                   {loading ? 'Saving…' : 'Save configuration'}
                 </Button>

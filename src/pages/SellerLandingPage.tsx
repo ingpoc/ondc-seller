@@ -12,6 +12,33 @@ function safeReturnPath(value: unknown): string {
     : '/dashboard';
 }
 
+export function SignInRequiredPage({ returnTo }: { returnTo?: string }) {
+  const { loading, login } = useAuthContext();
+  const next = safeReturnPath(returnTo);
+
+  return (
+    <PageLayout
+      title="Sign in required"
+      subtitle="This seller page is only available after you sign in. You will return here afterwards."
+    >
+      <Section
+        eyebrow="Seller workspace"
+        title="Sign in to continue"
+        description="Catalog, orders, store setup, and assistant tools stay private until you authenticate."
+        actions={
+          <Button type="button" size="lg" disabled={loading} onClick={() => login(next)}>
+            {loading ? 'Checking sign-in…' : 'Sign in to continue'}
+          </Button>
+        }
+      >
+        <p className="text-sm text-muted-foreground" data-testid="signin-return-to">
+          After sign-in you will return to {next}.
+        </p>
+      </Section>
+    </PageLayout>
+  );
+}
+
 export function SellerLandingPage() {
   const location = useLocation();
   const { isAuthenticated, loading, login } = useAuthContext();

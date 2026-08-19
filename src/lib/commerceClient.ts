@@ -1,5 +1,6 @@
 import type { UCPOrder, UCPOrderStatus } from '@ondc-sdk/shared';
 import type { BecknItem } from '../types';
+import { customerReference } from './displayText';
 import { TRUST_API_URL } from './identityUrls';
 import { isLocalBrowserHost } from './loopback';
 
@@ -93,6 +94,63 @@ export interface SellerCommerceIssue {
   updated_at: string;
 }
 
+export interface SellerStore {
+  store_id?: string;
+  store_name: string;
+  city: string;
+  state: string;
+  pin: string;
+  serviceability?: string;
+  serviceability_tokens: string[];
+  fulfilment_sla_hours: number | null;
+  return_window_days: number | null;
+  support_hours: string;
+  status: string;
+}
+
+export interface SellerStoreWrite {
+  store_name: string;
+  city: string;
+  state: string;
+  pin: string;
+  serviceability: string;
+  fulfilment_sla_hours: number | null;
+  return_window_days: number | null;
+  support_hours: string;
+  complete?: boolean;
+}
+
+export interface SellerStoreSnapshot {
+  store: SellerStore | null;
+  setup_required: boolean;
+}
+
+export class CommerceClientError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'CommerceClientError';
+    this.status = status;
+  }
+}
+
+export function isCommerceNotFound(error: unknown): boolean {
+  const status =
+    error instanceof CommerceClientError
+      ? error.status
+      : typeof error === 'object' && error && 'status' in error
+        ? Number((error as { status?: number }).status)
+        : NaN;
+  if (status === 404) return true;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /\b404\b|not found/i.test(message);
+}
+
+export function isSellerStoreReady(store: SellerStore | null | undefined): boolean {
+  return (store?.status || '').trim().toLowerCase() === 'ready';
+}
+
 export function paymentStatusLabel(status?: string): string {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'paid' || normalized === 'succeeded') return 'Paid';
@@ -122,7 +180,10 @@ async function demoFetch<T>(endpoint: string, init: RequestInit = {}): Promise<T
   });
   const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T>>;
   if (!response.ok || body.success === false) {
-    throw new Error(body.detail || body.message || `Commerce request failed (${response.status})`);
+    throw new CommerceClientError(
+      body.detail || body.message || `Commerce request failed (${response.status})`,
+      response.status,
+    );
   }
   return body.data as T;
 }
@@ -310,6 +371,52 @@ export async function listCommerceSellerOrders() {
 export async function getCommerceOrder(orderId: string) {
   const data = await demoFetch<{ order: DemoCommerceOrder }>(`/api/demo-commerce/seller/orders/${orderId}`);
   return mapDemoOrderToSellerOrder(data.order);
+}
+
+export async function resolveSellerOrderId(raw: string): Promise<string | null> {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+  try {
+    const order = await getCommerceOrder(trimmed);
+    if (order?.id) return order.id;
+  } catch (error) {
+    if (!isCommerceNotFound(error)) throw error;
+  }
+  const orders = await listCommerceSellerOrders();
+  const compact = customerReference(trimmed);
+  const match = orders.find((order) => {
+    const id = String(order.id || '');
+    return id === trimmed || customerReference(id) === compact;
+  });
+  return match?.id ?? null;
+}
+
+export async function getSellerStore(): Promise<SellerStoreSnapshot> {
+  try {
+    const data = await demoFetch<SellerStoreSnapshot>('/api/demo-commerce/seller/store');
+    const store = data?.store ?? null;
+    return {
+      store,
+      setup_required: Boolean(data?.setup_required) || !isSellerStoreReady(store),
+    };
+  } catch (error) {
+    if (isCommerceNotFound(error)) {
+      return { store: null, setup_required: true };
+    }
+    throw error;
+  }
+}
+
+export async function saveSellerStore(input: SellerStoreWrite): Promise<SellerStoreSnapshot> {
+  const data = await demoFetch<SellerStoreSnapshot>('/api/demo-commerce/seller/store', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+  const store = data?.store ?? null;
+  return {
+    store,
+    setup_required: Boolean(data?.setup_required) || !isSellerStoreReady(store),
+  };
 }
 
 export async function listCommerceSellerIssues(orderId?: string) {

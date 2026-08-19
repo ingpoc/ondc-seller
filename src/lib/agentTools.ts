@@ -9,6 +9,7 @@ import { buildAgentControlPlaneUrl } from './agentControlPlane';
 import {
   listCommerceSellerItems,
   listCommerceSellerOrders,
+  resolveSellerOrderId,
   type DemoCommerceItem,
 } from './commerceClient';
 import { rememberSamanthaFact } from './samanthaMemory';
@@ -94,6 +95,7 @@ export const SELLER_NAV_ALLOWLIST = [
   '/agentguard',
   '/config',
   '/config?tab=samantha',
+  '/business',
 ] as const;
 
 /** Coerce model tool args (e.g. path="catalog") into an app route — not user-utterance parsing. */
@@ -132,6 +134,9 @@ export function coerceSellerNavPath(raw: string): string | null {
     settings: '/config',
     dashboard: '/dashboard',
     home: '/dashboard',
+    business: '/business',
+    store: '/business',
+    'store setup': '/business',
   };
   return soft[label] ?? null;
 }
@@ -615,6 +620,24 @@ export async function runSellerTool(
         message: err instanceof Error ? err.message : 'Could not load Seller orders.',
       };
     }
+  } else {
+    try {
+      const resolved = await resolveSellerOrderId(orderId);
+      if (!resolved) {
+        return {
+          ok: false,
+          tool: name,
+          message: `Order ${orderId} was not found. Refund was not executed.`,
+        };
+      }
+      orderId = resolved;
+    } catch (err) {
+      return {
+        ok: false,
+        tool: name,
+        message: err instanceof Error ? err.message : 'Could not load Seller orders.',
+      };
+    }
   }
   if (!orderId) {
     return { ok: false, tool: name, message: 'No visible Seller order is available to refund.' };
@@ -627,26 +650,37 @@ export async function runSellerTool(
       resourceId: orderId,
       payload: { order_id: orderId },
     });
-    const decision = executed.decision ?? 'allow';
+    const decision =
+      executed.decision === 'allow' ||
+      executed.decision === 'need_approval' ||
+      executed.decision === 'deny'
+        ? executed.decision
+        : 'unknown';
     const receiptId = executed.receipt?.receipt_id;
-    const outcomeQuery = new URLSearchParams({ outcome: decision });
+    const executedNow = decision === 'allow' && Boolean(receiptId || executed.execution);
+    const outcomeQuery = new URLSearchParams({
+      outcome: decision === 'allow' && !executedNow ? 'unknown' : decision,
+    });
     if (receiptId) outcomeQuery.set('receipt', receiptId);
     if (executed.approval?.approval_id) {
       outcomeQuery.set('approval', executed.approval.approval_id);
       if (executed.decision_id) outcomeQuery.set('decision', executed.decision_id);
       if (executed.correlation_id) outcomeQuery.set('correlation', executed.correlation_id);
-      outcomeQuery.set('amount', String(amountInr));
-      outcomeQuery.set('resource', orderId);
     }
+    outcomeQuery.set('amount', String(amountInr));
+    outcomeQuery.set('resource', orderId);
+    const message =
+      decision === 'need_approval'
+        ? 'Refund requires exact one-time approval.'
+        : decision === 'deny'
+          ? 'Refund denied by AgentGuard.'
+          : executedNow
+            ? `Refund issued${receiptId ? `; receipt ${receiptId}` : ''}.`
+            : 'Refund was not executed.';
     return {
-      ok: decision === 'allow' || Boolean(receiptId),
+      ok: executedNow,
       tool: name,
-      message:
-        decision === 'need_approval'
-          ? 'Refund requires exact one-time approval.'
-          : decision === 'deny'
-            ? 'Refund denied by AgentGuard.'
-            : `Refund issued${receiptId ? `; receipt ${receiptId}` : ''}.`,
+      message,
       decision,
       receiptId,
       data: executed as unknown as Record<string, unknown>,

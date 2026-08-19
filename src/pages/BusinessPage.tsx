@@ -11,9 +11,11 @@ import {
 import { Input } from '@/components/ui/input';
 import {
   getSellerStore,
-  isCommerceNotFound,
+  isSellerStoreMissing,
+  isSellerStoreMissingMessage,
   isSellerStoreReady,
   saveSellerStore,
+  sellerStoreSaveErrorMessage,
   type SellerStore,
   type SellerStoreWrite,
 } from '../lib/commerceClient';
@@ -63,7 +65,7 @@ export function BusinessPage() {
     } catch (error) {
       setForm(formFromStore(null));
       setStoreReady(false);
-      if (isCommerceNotFound(error)) {
+      if (isSellerStoreMissing(error)) {
         setLoadError(null);
       } else {
         setLoadError(error instanceof Error ? error.message : 'Could not load store.');
@@ -92,7 +94,7 @@ export function BusinessPage() {
           : 'Draft saved. Complete the remaining fields to open the store.',
       );
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Could not save store setup.');
+      setSaveError(sellerStoreSaveErrorMessage(error));
     } finally {
       setSaving(null);
     }
@@ -119,7 +121,7 @@ export function BusinessPage() {
           description="Checking whether this seller already has a store record."
         />
       ) : null}
-      {loadError ? (
+      {loadError && !isSellerStoreMissingMessage(loadError) ? (
         <Alert
           tone="warning"
           title="Store record not on file yet"

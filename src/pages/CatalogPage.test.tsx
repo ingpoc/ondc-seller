@@ -99,4 +99,25 @@ describe('CatalogPage trust gating', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Catalog saved');
     expect(screen.getByRole('status')).toHaveTextContent('Basmati Rice 5kg was updated.');
   });
+
+  it('does not treat a missing-store 404 as a blocking catalog error', () => {
+    mockUseTrustState.mockReturnValue({
+      state: 'verified',
+      loading: false,
+      error: null,
+      reason: null,
+    });
+    mockUseApi.mockReturnValue({
+      data: null,
+      loading: false,
+      error: 'Not Found',
+      execute: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(screen.queryByText('Store setup unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unable to load the catalog')).not.toBeInTheDocument();
+    expect(screen.getByText('No products published yet')).toBeInTheDocument();
+  });
 });

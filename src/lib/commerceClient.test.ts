@@ -5,6 +5,10 @@ import {
   getSellerCatalogProduct,
   getSellerStore,
   isCommerceNotFound,
+  isSellerStoreMissing,
+  isSellerStoreMissingMessage,
+  listCommerceSellerItems,
+  sellerStoreSaveErrorMessage,
   listCommerceSellerOrders,
   listSellerCatalogResponse,
   loadSellerOrderByLookup,
@@ -399,6 +403,45 @@ describe('seller store and order resolution', () => {
 
     await expect(getSellerStore()).resolves.toEqual({ store: null, setup_required: true });
     expect(isCommerceNotFound(new CommerceClientError('Not Found', 404))).toBe(true);
+  });
+
+  it('treats Store setup unavailable as a missing store, not a fatal load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, detail: 'Store setup unavailable' }),
+      })),
+    );
+
+    await expect(getSellerStore()).resolves.toEqual({ store: null, setup_required: true });
+    expect(isSellerStoreMissing(new CommerceClientError('Store setup unavailable', 404))).toBe(
+      true,
+    );
+    expect(isSellerStoreMissingMessage('Store setup unavailable')).toBe(true);
+    expect(sellerStoreSaveErrorMessage(new CommerceClientError('Not Found', 404))).toBeNull();
+    expect(sellerStoreSaveErrorMessage(new CommerceClientError('Unauthorized', 401))).toBe(
+      'Sign in again to save store setup.',
+    );
+    expect(sellerStoreSaveErrorMessage(new CommerceClientError('boom', 502))).toBe(
+      'The store service failed. Try again in a moment.',
+    );
+  });
+
+  it('treats a missing-store catalog 404 as an empty shelf', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, detail: 'Not Found' }),
+      })),
+    );
+
+    await expect(listCommerceSellerItems()).resolves.toEqual([]);
+    const listed = await listSellerCatalogResponse();
+    expect(listed['bpp/providers'][0].items).toEqual([]);
   });
 
   it('resolves a compact customer reference to a visible order id', async () => {

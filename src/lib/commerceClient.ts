@@ -185,16 +185,53 @@ export class CommerceClientError extends Error {
   }
 }
 
+export function commerceErrorStatus(error: unknown): number {
+  if (error instanceof CommerceClientError) return error.status;
+  if (typeof error === 'object' && error && 'status' in error) {
+    return Number((error as { status?: number }).status);
+  }
+  return NaN;
+}
+
+export function commerceErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? '');
+}
+
+export function isCommerceAuthError(error: unknown): boolean {
+  const status = commerceErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
+export function isCommerceServerError(error: unknown): boolean {
+  const status = commerceErrorStatus(error);
+  return status >= 500 && status < 600;
+}
+
+export function isSellerStoreMissingMessage(message: string | null | undefined): boolean {
+  const text = String(message ?? '').trim();
+  if (!text) return false;
+  return /\b404\b|not found|store setup unavailable|setup unavailable/i.test(text);
+}
+
 export function isCommerceNotFound(error: unknown): boolean {
-  const status =
-    error instanceof CommerceClientError
-      ? error.status
-      : typeof error === 'object' && error && 'status' in error
-        ? Number((error as { status?: number }).status)
-        : NaN;
-  if (status === 404) return true;
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  return /\b404\b|not found/i.test(message);
+  if (commerceErrorStatus(error) === 404) return true;
+  return isSellerStoreMissingMessage(commerceErrorMessage(error));
+}
+
+/** Missing store row / first-time setup — not a fatal auth or server failure. */
+export function isSellerStoreMissing(error: unknown): boolean {
+  if (isCommerceAuthError(error) || isCommerceServerError(error)) return false;
+  if (isCommerceNotFound(error)) return true;
+  return isSellerStoreMissingMessage(commerceErrorMessage(error));
+}
+
+/** Null means first-time setup (404 / no store row) — keep the form, do not block. */
+export function sellerStoreSaveErrorMessage(error: unknown): string | null {
+  if (isCommerceAuthError(error)) return 'Sign in again to save store setup.';
+  if (isCommerceServerError(error)) return 'The store service failed. Try again in a moment.';
+  if (isSellerStoreMissing(error)) return null;
+  const message = commerceErrorMessage(error).trim();
+  return message || 'Could not save store setup.';
 }
 
 export function isSellerStoreReady(store: SellerStore | null | undefined): boolean {
@@ -397,10 +434,15 @@ export async function getPublishedCatalogProduct(itemId: string) {
 }
 
 export async function listCommerceSellerItems() {
-  const data = await demoFetch<{ items: DemoCommerceItem[]; count: number }>(
-    '/api/demo-commerce/seller/items',
-  );
-  return data.items ?? [];
+  try {
+    const data = await demoFetch<{ items: DemoCommerceItem[]; count: number }>(
+      '/api/demo-commerce/seller/items',
+    );
+    return data.items ?? [];
+  } catch (error) {
+    if (isSellerStoreMissing(error)) return [];
+    throw error;
+  }
 }
 
 export async function listSellerCatalogResponse() {
@@ -463,7 +505,7 @@ export async function getSellerStore(): Promise<SellerStoreSnapshot> {
       setup_required: Boolean(data?.setup_required) || !isSellerStoreReady(store),
     };
   } catch (error) {
-    if (isCommerceNotFound(error)) {
+    if (isSellerStoreMissing(error)) {
       return { store: null, setup_required: true };
     }
     throw error;

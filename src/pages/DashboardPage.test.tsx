@@ -4,13 +4,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { categoryCountHint, DashboardPage } from './DashboardPage';
 
+const mockUseApi = vi.fn();
+
 vi.mock('../hooks/useApi', () => ({
-  useApi: () => ({
-    data: { 'bpp/providers': [{ items: [] }] },
-    loading: false,
-    error: null,
-    execute: vi.fn(),
-  }),
+  useApi: (...args: unknown[]) => mockUseApi(...args),
 }));
 
 vi.mock('../hooks/useSubject', () => ({
@@ -44,6 +41,12 @@ describe('Dashboard category summary', () => {
 describe('Dashboard overview route', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockUseApi.mockReturnValue({
+      data: { 'bpp/providers': [{ items: [] }] },
+      loading: false,
+      error: null,
+      execute: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -64,6 +67,28 @@ describe('Dashboard overview route', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(screen.getByRole('heading', { name: 'Seller dashboard' })).toBeVisible();
     expect(screen.queryByText('Store setup page')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Store setup' })).toBeInTheDocument();
+  });
+
+  it('does not treat a missing-store 404 as Catalog unavailable', () => {
+    mockUseApi.mockReturnValue({
+      data: null,
+      loading: false,
+      error: 'Store setup unavailable',
+      execute: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<DashboardPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('Catalog unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText('Store setup unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('No products yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Store setup' })).toBeInTheDocument();
   });
 });

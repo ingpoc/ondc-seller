@@ -24,6 +24,7 @@ import {
   notifySellerCatalogChanged,
   SELLER_CATALOG_CHANGED_EVENT,
 } from '../lib/sellerCatalogEvents';
+import { isSellerStoreMissingMessage } from '../lib/commerceClient';
 
 type CatalogItem = BecknItem & {
   quantity?: number;
@@ -93,6 +94,7 @@ export function CatalogPage() {
     });
   }, [items, query]);
   const featuredItems = filteredItems.slice(0, 3);
+  const catalogMissingStore = isSellerStoreMissingMessage(error);
   const categoryCount = new Set(filteredItems.map((item) => item.category_id ?? 'uncategorized'))
     .size;
   const imageryCount = filteredItems.filter((item) => item.images?.[0]?.url).length;
@@ -297,7 +299,7 @@ export function CatalogPage() {
             description="Pulling the latest seller inventory for catalog review."
           />
         </div>
-      ) : error ? (
+      ) : error && !catalogMissingStore ? (
         <div className="mt-10">
           <AsyncState
             kind="error"

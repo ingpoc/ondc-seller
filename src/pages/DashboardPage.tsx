@@ -15,6 +15,7 @@ import { useTrustState } from '../hooks/useTrustState';
 import { TrustNotice } from '../components/TrustStatus';
 import { elevatedTrustSatisfied } from '../lib/trust';
 import { useAuthContext } from '../contexts/AuthContext';
+import { isSellerStoreMissingMessage } from '../lib/commerceClient';
 
 interface SellerCatalogItem {
   id: string;
@@ -50,6 +51,7 @@ export function DashboardPage() {
     () => (((data as any)?.['bpp/providers']?.[0]?.items ?? []) as SellerCatalogItem[]),
     [data]
   );
+  const catalogMissingStore = isSellerStoreMissingMessage(error);
   const itemCount = items.length;
   const categoryCount = new Set(items.map((item) => item.category_id ?? 'uncategorized')).size;
   const trustLabel = trust.loading
@@ -137,7 +139,7 @@ export function DashboardPage() {
             title="Loading catalog"
             description="Pulling the latest seller inventory."
           />
-        ) : error ? (
+        ) : error && !catalogMissingStore ? (
           <AsyncState
             kind="error"
             title="Catalog unavailable"
@@ -148,7 +150,7 @@ export function DashboardPage() {
               </Button>
             }
           />
-        ) : itemCount === 0 ? (
+        ) : itemCount === 0 || catalogMissingStore ? (
           <AsyncState
             kind="empty"
             title="No products yet"

@@ -29,6 +29,10 @@
       "destination": "https://gateway.aadharcha.in/api/demo-commerce/:path*"
     },
     {
+      "source": "/api/:path*",
+      "destination": "https://gateway.aadharcha.in/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
